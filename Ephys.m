@@ -1,30 +1,109 @@
 %% Electrophysiologyiological Data Class
-%   For storing, viewing, and processing electrophysiological data
 %
-%   CONSTRUCTOR
-%       E = Ephys(Fs,data,alignIndex,chanNo);
+% CONSTRUCTOR
+%   Eph = Ephys(Fs, data, alignIndex, chanNo)
 %
-%   PROPERTIES
-%       Fs <scalar> - data sample rate in Hz (default: 1000)
-%       data <numeric array> - timeseries data of dimensionality <= 3
-%       alignIdx <integer> - alignment index (default: 1)
-%       chanNo <
+% PROPERTIES (public access)
+%   Fs <scalar>: sampling frequency in Hz
+%   data <numeric>: array of dimensions (samples x channels x trials)
+%   alignIndex <scalar>: alignment point (i.e. sample corresponding to t=0)
+%       (default: 1)
+%   chanNo <numeric>: vector of channel numbers (default: 1:size(data,2))
 %
-%   METHODS
-%   ~type 'Ephys.man' for full user-manual
+% PROPERTIES (private set access)
+%   time: vector in seconds
+%   nSamples: number of data points
+%   nChannels: channel count
+%   nTrials: trial count
+%   trialNo: trial number
+%
+% METHODS (static)
+%   Eph = Ephys.init_from_nsx(filePath) initalizes an Ephys object by 
+%       reading an NSx file from specified path
+%
+% METHODS (public access)
+%   plus(E1,E2) overloads the normal "plus" operation to define adding 
+%       two Ephys objects (i.e. E1 + E2) by concatenating their data arrays 
+%       along the first (temporal) dimension. E1 and E2 must have the same
+%       number of channels.
+%
+%   [Eph,tIdx] = Eph.range(tLim) returns a new object whose data array 
+%       contains only the samples that fall between time limits 
+%       [tLim(1), tLim(2)]. Also returns the logical vector (tIdx) whose 
+%       "true" indices correspond to the samples extracted from the 
+%       original data array.
+%
+%   Eph.chan(idx) returns a new object whose data array contains only the
+%       channel indices (idx) from the original object
+%
+%   [Eph,trialNo] = Eph.trial(num) returns a new object whose data array
+%       contains only the trial numbers (num) from the original object. num
+%       can also be specified as 'rand', in which case a random trial
+%       number will be drawn and returned (trialNo)
+%
+%   Eph.rect rectifies (i.e. takes absolute value) the data array
+%
+%   Eph.filt(...) is a flexible method for filtering the data
+%       filt(type,n,Wn) filters with an nth-order Butterworth filter with
+%           passband Wn in Hz. If type is 'bandpass' and Wn a 2-element
+%           vector, filt designs a bandpass filter. If type is 'low' or
+%           'high' and Wn a scalar, filt designs a lowpass or highpass
+%           filter, respectively.
+%       filt('diff',n) applies an nth-order differentiating filter
+%       filt('gau',sd) smooths with a Gaussian filter with standard
+%           deviation sd in seconds
+%       filt('box',wid) smooths with a boxcar filter of width wid in
+%           seconds.
+%
+%   [Eph,sigma] = Eph.normalize returns a new object whose data array is
+%       normalized to the estimated standard deviation of the noise on each
+%       channel (sigma).
+%
+%   Eph.residual(Neu) ...
+%
+%   [Spk,idx] = Eph.detect_spikes detects spikes using FINDPULSES and
+%       returns spike indices (idx) in a Spike object (Spk). Accepts all
+%       optional and variable arguments as FINDPULSES
+%
+%   Eph.plot(...) plots all data. If array contains multiple channels,
+%       plots as a set of vertically stacked subplots with linked x-axes.
+%       plot(...,'fig',code) clears current axes if code is 'clf' or opens
+%           a new figure if code is 'new'
+%       plot(...,'sigma',code) clears current axes if code is 'clf' or opens
+%           a new figure if code is 'new'
+%       plot(...,'fig',code) clears current axes if code is 'clf' or opens
+%           a new figure if code is 'new'
+%       plot(...,'fig',code) clears current axes if code is 'clf' or opens
+%           a new figure if code is 'new'
+%
+%
+%
+% EXAMPLE(S) 
+%
+%
+% IMPLEMENTATION
+% Other m-files required: none
+% Subfunctions: FINDPULSES
+% MAT-files required: none
+%
+% SEE ALSO: FINDPULSES
+
+% Authors: Najja Marshall
+% Emails: njm2149@columbia.edu
+% Dated:
 classdef Ephys
     properties (Access = public)
-        Fs = 1e3            % sample frequency (Hz)
-        data                % timeseries data (samples x channels x trials)
-        alignIndex = 1      % aligment index (scalar integer)
-        chanNo              % channel number (1D integer array)
+        Fs = 1e3
+        data
+        alignIndex = 1
+        chanNo
     end
     properties (SetAccess = private)
-        time                % time vector
-        nSamples            % number of data points
-        nChannels           % number of channels
-        nTrials             % number of trials
-        trialNo             % trial number
+        time
+        nSamples
+        nChannels
+        nTrials
+        trialNo
     end
     methods (Static)
         function obj = init_from_nsx(filePath)
@@ -112,23 +191,6 @@ classdef Ephys
         % -----------------------------------------------------------------
         % SPECIAL
         % -----------------------------------------------------------------
-        function disp(obj)
-            txt = '%i-channel ephys data sampled at %.3f kHz for %.3f %s\n';
-            durSec = obj.nSamples/obj.Fs;
-            if durSec < 60
-                dur = durSec;
-                durUnit = 'sec';
-                
-            elseif durSec > 60 && durSec < 3600
-                dur = durSec/60;
-                durUnit = 'min';
-                
-            else
-                dur = durSec/3600;
-                durUnit = 'hrs';
-            end
-           fprintf(txt,obj.nChannels,obj.Fs/1e3,dur,durUnit);
-        end
         function Eph = plus(E1,E2)
             assert(E1.Fs == E2.Fs)
             assert(size(E1,2) == size(E2,2))
@@ -152,17 +214,18 @@ classdef Ephys
             obj.chanNo = obj.chanNo(idx);
             obj.data = obj.data(:,idx,:);
         end
-        function obj = trial(obj,num)
+        function [obj,trialNo] = trial(obj,num)
             % selects specified trials from data
             if isscalar(num)
                 assert(num>=1 && num<=obj.nTrials)
+                trialNo = num;
             elseif ischar(num) && strcmp(num,'rand')
-                num = randi(obj.nTrials);
+                trialNo = randi(obj.nTrials);
             else
                 error('Provide a scalar trial number or specify as ''rand''.')
             end
-            obj.data = obj.data(:,:,num);
-            obj.trialNo = num;
+            obj.data = obj.data(:,:,trialNo);
+            obj.trialNo = trialNo;
         end
         function [obj,v] = cat_trials(obj,num)
             % concatenates trials
@@ -195,9 +258,9 @@ classdef Ephys
                 switch type
                     case {'bandpass','low','high'}
                         n = arg1;
-                        w = arg2;
+                        Wn = arg2;
                         
-                        [b,a] = butter(n, w/(obj(ii).Fs/2), type);
+                        [b,a] = butter(n, Wn/(obj(ii).Fs/2), type);
                         dataClass = class(obj(ii).data);
                         
                         xF = mat2cell(obj(ii).data, obj(ii).nSamples,...
@@ -237,49 +300,31 @@ classdef Ephys
                 sigma = sigma{1};
             end
         end
-        function [Cinv, Cn] = noise_cov(obj,t0,waveDur)
-            xNoise = EMG.range(t0+[0,1-1/obj.Fs]).data;
-            Cn = noisecov(obj.data,obj.Fs,waveDur,'xNoise',xNoise);
-            Cinv = Cn^(-1);
-        end
-        function [trMean, trSte, trStd] = trial_avg(obj)
-            % trial average
-            trMean = mean(double(obj.data),3);
-            trStd = std(double(obj.data),[],3);
-            trSte = trStd/sqrt(obj.nTrials-1);
-            
-            % convert to native data class
-            dataClass = class(obj.data);
-            if ~isa(obj.data,'double')
-                eval(sprintf('trMean = %s(trMean);',dataClass))
-                eval(sprintf('trSte = %s(trSte);',dataClass))
-            end
-        end
-        function [res,vEst] = residual(obj,Neu)
-            % compute residual
-            assert(isa(Neu,'Neuron'))
-            vEst = zeros(obj.nSamples, obj.nChannels);
-            idxLim = [1 length(obj.time)];
-            for ch = 1:obj.nChannels
-                for un = 1:Neu.nUnits
-                    si = find(Neu.spikes(:,un)); % + obj.alignIndex;
-                    si = si(si>idxLim(1) & si<idxLim(2));
-                    x = zeros(obj.nSamples,1);
-                    x(si) = 1;
-                    vEst(:,ch) = vEst(:,ch) + conv(x,Neu.waveform(:,ch,un),'same');
-                end
-            end
-            eval(sprintf('yEst = %s(yEst);',class(obj.data)))
-            res = obj.data - vEst;
-        end
+%         function [res,vEst] = residual(obj,Neu)
+%             % compute residual
+%             assert(isa(Neu,'Neuron'))
+%             vEst = zeros(obj.nSamples, obj.nChannels);
+%             idxLim = [1 length(obj.time)];
+%             for ch = 1:obj.nChannels
+%                 for un = 1:Neu.nUnits
+%                     si = find(Neu.spikes(:,un)); % + obj.alignIndex;
+%                     si = si(si>idxLim(1) & si<idxLim(2));
+%                     x = zeros(obj.nSamples,1);
+%                     x(si) = 1;
+%                     vEst(:,ch) = vEst(:,ch) + conv(x,Neu.waveform(:,ch,un),'same');
+%                 end
+%             end
+%             eval(sprintf('yEst = %s(yEst);',class(obj.data)))
+%             res = obj.data - vEst;
+%         end
         % -----------------------------------------------------------------
         % WRAPPER FUNCTIONS
         % -----------------------------------------------------------------
-        function Spk = detect_spikes(obj,varargin)
+        function [Spk,idx] = detect_spikes(obj,varargin)
             % detect spike events and return a Spike object
             isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
             P = inputParser;
-            addOptional(P, 'thresh', 4, @(x) isscalarnum(x,-Inf,Inf))
+            addParameter(P, 'thresh', 4, @(x) isscalarnum(x,-Inf,Inf))
             addParameter(P, 'sym', true, @islogical)
             addParameter(P, 'sigma', [], @(x) isempty(x) || isnumeric(x))
             addParameter(P, 'minWid', 1e-3, @(x) isscalarnum(x,0,1))
@@ -295,31 +340,19 @@ classdef Ephys
             end
             for ii = 1:obj.nChannels
                 Spk(ii).index = idx{ii};
+                Spk(ii).nSamples = obj.nSamples;
             end
         end
         % -----------------------------------------------------------------
         % PLOTTING
         % -----------------------------------------------------------------
-        function fh = set_fig(~,code)
-            % set figure
-            if isempty(code)
-                return
-            end
-            switch code
-                case 'clf'
-                    clf
-                    fh = gcf;
-                case 'new'
-                    fh = figure;
-            end
-        end
         function plot(obj,varargin)
             % plot
             P = inputParser;
             addParameter(P,'fig',[],@(x) ischar(x) && ismember(x,{'clf','new'}))
+            addParameter(P,'sigma',[],@isnumeric)
             addParameter(P,'Spk',[],@(x) isa(x,'Spike'))
             addParameter(P,'Neu',[],@(x) isa(x,'Neuron'))
-            addParameter(P,'sigma',[],@isnumeric)
             addParameter(P,'txt',[],@ischar)
             parse(P,varargin{:})
             
@@ -329,13 +362,13 @@ classdef Ephys
             for ii = 1:obj.nChannels
                 if obj.nChannels > 1
                     ax(ii) = subplot(obj.nChannels,1,ii);
-                    if ~isempty(P.Results.sigma)
-                        hold on
-                        yline(P.Results.sigma,'r');
-                        yline(-P.Results.sigma,'r');
-                    end
                 end
                 plot(obj.time,obj.data(:,ii),'k')
+                if ~isempty(P.Results.sigma)
+                    hold on
+                    plot(get(gca,'xlim'),P.Results.sigma*[1 1],'r')
+                    plot(get(gca,'xlim'),-P.Results.sigma*[1 1],'r');
+                end
                 title(sprintf('channel %i',obj.chanNo(ii)))
             end
             xlabel('time (s)')
@@ -400,6 +433,18 @@ classdef Ephys
         end
     end
     methods (Access = private)
+        function fh = set_fig(~,code)
+            if isempty(code)
+                return
+            end
+            switch code
+                case 'clf'
+                    clf
+                    fh = gcf;
+                case 'new'
+                    fh = figure;
+            end
+        end
         function obj = update_time(obj)
             obj.time = ((1:obj.nSamples)'-obj.alignIndex)/obj.Fs;
         end

@@ -17,7 +17,6 @@ xPos = [0,cumsum(repmat(1.05*size(u,1),1,nUnit-1))];
 
 % vertical offset
 yLim = [floor(min(u(:))), ceil(max(u(:)))];
-% yLim = [-2660 4920];
 yPos = round(flipud([0;cumsum(repmat(1.05*diff(yLim),nChan-1,1))]));
 
 % y-tick position and values

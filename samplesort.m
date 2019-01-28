@@ -69,8 +69,14 @@ Spk = Spk.triage(cutoff);
 
 %% Compute mutual information between spike trains across channels
 
+% ensure matched number of samples
+for ii = 1:length(Spk)
+    Spk(ii).nSamples = Eph.nSamples;
+end
+
 % spike indices
 s = Spk.sparsify;
+s = cat(2,s{:});
 s = mat2cell(s,size(s,1),ones(1,size(s,2)));
 spkIdx = cellfun(@find,s,'uni',false);
 

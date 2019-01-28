@@ -5,7 +5,7 @@ classdef Spike
         index
         waveform
         label
-        nDataPoints
+        nSamples
         maxFeat = 20
         clusDim = 3
     end
@@ -21,7 +21,6 @@ classdef Spike
         % CONSTRUCTOR
         % -----------------------------------------------------------------
         function obj = Spike(Fs, index, waveform, label)
-            
             if nargin > 0 && isnumeric(Fs) && isscalar(Fs)
                 obj.Fs = Fs;
             end
@@ -32,7 +31,7 @@ classdef Spike
                 obj.waveform = waveform;
             end
             if nargin > 3 && isnumeric(label)
-                obj.label = uint8(label(:));
+                obj.label = label(:);
             end
         end
         % -----------------------------------------------------------------
@@ -54,7 +53,7 @@ classdef Spike
         end
         function obj = set.label(obj,label)
             if isnumeric(label)
-                obj.label = uint8(label);
+                obj.label = label(:);
                 obj = obj.update_template;
                 obj = obj.update_clus;
             end
@@ -67,20 +66,6 @@ classdef Spike
         % -----------------------------------------------------------------
         % GET METHODS
         % -----------------------------------------------------------------
-        function idx = indices(obj)
-            idx = cell(length(obj),1);
-            for ii = 1:length(obj)
-                if nnz(obj(ii).label)>0
-                    unqLabels = unique(obj(ii).label(obj(ii).label>0));
-                    idx{ii} = cellfun(@(n) obj(ii).index(obj(ii).label==n), num2cell(unqLabels), 'uni', false);
-                else
-                    idx{ii} = obj(ii).index;
-                end
-            end
-            if length(obj) == 1
-                idx = cat(1,idx{:});
-            end
-        end
         function lab = get.label(obj)
             if isempty(obj.label) && ~isempty(obj.waveform)
                 lab = zeros(size(obj.waveform,1),1,'uint8');
@@ -88,15 +73,15 @@ classdef Spike
                 lab = obj.label;
             end
         end
-        function nPts = get.nDataPoints(obj)
-            if isempty(obj.nDataPoints)
+        function nPts = get.nSamples(obj)
+            if isempty(obj.nSamples)
                 if isempty(obj.index)
                     nPts = 0;
                 else
                     nPts = max(obj.index);
                 end
             else
-                nPts = obj.nDataPoints;
+                nPts = obj.nSamples;
             end
         end
         function feat = get.feature(obj)
@@ -110,29 +95,65 @@ classdef Spike
             end
         end
         % -----------------------------------------------------------------
-        % GET WAVEFORMS
+        % INDEX MANAGEMENT
+        % -----------------------------------------------------------------
+        function idx = indices(obj)
+            % return all spike indices
+            idx = cell(length(obj),1);
+            for ii = 1:length(obj)
+                if nnz(obj(ii).label)>0
+                    unqLabels = unique(obj(ii).label(obj(ii).label>0));
+                    idx{ii} = cellfun(@(n) obj(ii).index(obj(ii).label==n), num2cell(unqLabels), 'uni', false);
+                else
+                    idx{ii} = obj(ii).index;
+                end
+            end
+            if length(obj) == 1
+                idx = cat(1,idx{:});
+            end
+        end
+        function s = sparsify(obj)
+            % return spike locations as a sparse array
+            assert(isequal(obj.nSamples,obj(1).nSamples),'All spike objects must have the same number of samples')
+            s = cell(1,length(obj));
+            for ii = 1:length(obj)
+                unitNo = unique(obj(ii).label(obj(ii).label>0));
+                nUnits = length(unitNo);
+                if nUnits == 0
+                    s{ii} = sparse(obj(ii).index,1,true,obj(ii).nSamples,1);
+                else
+                    s{ii} = spalloc(obj(ii).nSamples,nUnits,obj(ii).count);
+                    for jj = 1:nUnits
+                        idx = obj(ii).index(obj(ii).label==unitNo(jj));
+                        s{ii}(:,jj) = sparse(idx,1,true,obj(ii).nSamples,1);
+                    end
+                end
+            end
+            s = logical(cell2mat(s));
+        end
+        % -----------------------------------------------------------------
+        % WAVEFORM MANAGEMENT
         % -----------------------------------------------------------------
         function obj = get_waveforms(obj,v,waveDur)
-            % get spike waveforms via spike-triggered average 
+            % get spike waveforms via spike-triggered average
+            assert(size(v,2)==length(obj),'v must have same number of columns as entries in the object array')
             waveLen = round(waveDur*obj(1).Fs);
             waveLen = waveLen + mod(waveLen,2);
             for ii = 1:length(obj)
                 obj(ii).waveform = cell2mat(sta(v(:,ii),num2cell(obj(ii).index),waveLen));
             end
         end
-        % -----------------------------------------------------------------
-        % ALIGN WAVEFORMS
-        % -----------------------------------------------------------------
         function obj = align(obj,v,waveDur,refDur)
+            % align waveforms
             for ii = 1:length(obj)
-                [obj(ii).waveform, obj(ii).index] = alignwaveforms(v(:,ii),...
-                    obj(ii).Fs, obj(ii).index, 'waveDur',waveDur,'refDur',refDur);
+                [obj(ii).waveform,obj(ii).index] = alignwaveforms(v(:,ii),obj(ii).Fs,obj(ii).index,'waveDur',waveDur,'refDur',refDur);
             end
         end
         % -----------------------------------------------------------------
-        % CLUSTER (Dirichlet Process Gaussian Mixture Model)
+        % CLUSTER
         % -----------------------------------------------------------------
         function obj = cluster(obj,nPC,maxClus)
+            % cluster waveforms via DP-GMM
             for ii = 1:length(obj)
                 if obj(ii).count == 0
                     continue
@@ -140,35 +161,6 @@ classdef Spike
                 obj(ii).clusDim = nPC;
                 obj(ii).label = mixGaussVb(obj(ii).feature(:,1:nPC)',maxClus)';
             end
-        end
-        % -----------------------------------------------------------------
-        % GENERATE SPARSE ARRAY
-        % -----------------------------------------------------------------
-        function s = sparsify(obj)
-            s = cell(1,length(obj));
-            for ii = 1:length(obj)
-                unitNo = unique(obj(ii).label(obj(ii).label>0));
-                nUnits = length(unitNo);
-                if nUnits == 0
-                    s{ii} = sparse(obj(ii).index,1,true,obj(ii).nDataPoints,1);
-                else
-                    s{ii} = spalloc(obj(ii).nDataPoints,nUnits,obj(ii).count);
-                    for jj = 1:nUnits
-                        idx = obj(ii).index(obj(ii).label==unitNo(jj));
-                        s{ii}(:,jj) = sparse(idx,1,true,obj(ii).nDataPoints,1);
-                    end
-                end
-            end
-            s = logical(cell2mat(s));
-        end
-        % -----------------------------------------------------------------
-        % GET UNIT CHANNEL NUMBERS
-        % -----------------------------------------------------------------
-        function chanNo = unit_channel(obj)
-            allChanNo = num2cell(1:length(obj))';
-            nUnits = arrayfun(@(S) size(S.template,2),obj,'uni',false);
-            chanNo = cellfun(@(cNo,nU) repmat(cNo,nU,1), allChanNo, nUnits,'uni',false); 
-            chanNo = cat(1,chanNo{:});
         end
         % -----------------------------------------------------------------
         % LABEL MANAGEMENT
@@ -273,6 +265,13 @@ classdef Spike
                 [wSim,nearestTemplate] = max(wSim,[],2);
                 obj(ii).label(unsrtIdx(wSim>thresh(ii))) = nearestTemplate(wSim>thresh(ii));
             end
+        end
+        function chanNo = unit_channel(obj)
+            % return channel numbers for each cluster on each channel
+            allChanNo = num2cell(1:length(obj))';
+            nUnits = arrayfun(@(S) size(S.template,2),obj,'uni',false);
+            chanNo = cellfun(@(cNo,nU) repmat(cNo,nU,1), allChanNo, nUnits,'uni',false); 
+            chanNo = cat(1,chanNo{:});
         end
         % -----------------------------------------------------------------
         % PLOTTING

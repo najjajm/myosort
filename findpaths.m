@@ -1,11 +1,11 @@
 %% FINDPATHS
-% Finds paths between nodes using an adjacency matrix
+% Finds paths between connected nodes in a graph
 %
 % SYNTAX
 %   paths = findpaths(A)
 %
 % REQUIRED INPUTS
-%   A (double array) - adjacency matrix
+%   A (square array) - adjacency matrix 
 %
 % OPTIONAL INPUTS: none
 %
@@ -17,14 +17,15 @@
 % EXAMPLE(S)
 %
 %   % generate a list of connected nodes
-%   x = nchoosek(1:6,2);
+%   nNodes = 10;
+%   x = nchoosek(1:nNodes,2);
 %   y = rand(size(x,1),1); 
-%   y(y>.75)=1; 
+%   y(y>.9)=1; 
 %   y(y~=1)=0;
 %
 %   % make adjacency matrix
-%   A = zeros(max(x));
-%   A(sub2ind(size(A), x(y==1,1), x(y==1,2)) = 1;
+%   A = false(nNodes);
+%   A(sub2ind(size(A), x(y==1,1), x(y==1,2))) = true;
 %
 %   % find paths
 %   paths = findpaths(A);
@@ -49,7 +50,7 @@ P = inputParser;
 P.FunctionName = 'FINDPATHS';
 
 % add required, optional, and parameter-value pair arguments
-addRequired(P, 'A', @(x) isnumeric(x) && size(x,1)==size(x,2));
+addRequired(P, 'A', @(x) size(x,1)==size(x,2));
 
 % clear workspace (parser object retains the data while staying small)
 parse(P, A, varargin{:});
@@ -83,14 +84,14 @@ while nnz(A) > 0
             
             % add connections from current node
             edges = find(A(node,:));
-            paths{end} = [paths{end}, edges(~ismember(edges,paths{end}))];
+            paths{end} = [paths{end}, setdiff(edges,paths{end})];
             
             % remove from adjacency matrix
             A(node,edges) = 0;
             
             % add connections to current node
             edges = find(A(:,node));
-            paths{end} = [paths{end}, edges(~ismember(edges,paths{end}))];
+            paths{end} = [paths{end}, setdiff(edges',paths{end})];
             
             % remove from adjacency matrix
             A(edges,node) = 0;
