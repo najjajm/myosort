@@ -84,20 +84,21 @@ else
     spkIdx = cellfun(@find, mat2cell(s,ones(nChannels,1),nDataPoints),'uni',false);
 end
 spkIdx = cellfun(@(z) z(:),spkIdx,'uni',false);
-nUnits = length(spkIdx);
 
-% bound spike indices within limits
-spkIdxNew = cellfun(@(z) z(z>=spkLim(1) & z<=spkLim(2)), spkIdx,'uni',false);
+% remove unbounded spike indices
+spkIdxNew = cellfun(@(z) z(z>=spkLim(1) & z<=spkLim(2)), spkIdx, 'uni', false);
+spkIdxNew(cellfun(@isempty,spkIdxNew)) = [];
+nObs = length(spkIdxNew);
 
 % take spike-triggered average
-y = cell(nUnits,nChannels);
-for un = 1:nUnits
+y = cell(nObs,nChannels);
+for un = 1:nObs
     for ch = 1:nChannels
         y{un,ch} = cell2mat(cellfun(@(idx) X(ch,idx+frame), num2cell(spkIdxNew{un}),'uni',false));
     end
 end
 
 % extract singular output from cell
-if nUnits == 1 && nChannels == 1
+if nObs == 1 && nChannels == 1
     y = y{:};
 end

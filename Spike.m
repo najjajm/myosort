@@ -1,4 +1,74 @@
 %% Spike Data Class
+%
+% CONSTRUCTOR
+%   Spk = Spike(Fs, index, waveform, label)
+%
+% PROPERTIES (public access)
+%   Fs <scalar>: sampling frequency in Hz
+%   index <numeric>: vector of spike indices
+%   waveform <numeric>: array of waveform snippets extracted from the data
+%       at each spike index
+%   label <numeric>: vector of assignment labels for each spike event.
+%       Unique, non-negative values correspond to distinct clusters.
+%   nSamples <scalar>: number of data points in the full data array in
+%       which spike events were detected
+%   maxFeat <scalar>: maximum number of features stored in memory for each
+%       waveform (default: 20)
+%   clusDim <scalar>: number of features used for clustering (default: 3)
+%
+% PROPERTIES (private set access)
+%   count: number of spike events
+%   waveLength: number of samples in each waveform
+%   feature: projections of the waveforms into the first maxFeat principal
+%       components, inferred across all waveforms
+%   template: waveform templates for each cluster
+%   Clus: structure containing the number of dimensions used to perform the
+%       clustering, the ID (label) of each cluster, size (number of
+%       spikes), standard deviation at each time step, and entropy (for a
+%       multivariate Gaussian)
+%
+% METHODS (public access)
+%   Spk.indices equivalent to "index" if Spk is a scalar object. For an
+%       object array, returns a cell array containing the spike indices for
+%       each object. Further separates spike indices by cluster if "label"
+%       contains any non-negative values.
+%
+%   Spk.sparsify converts spike indices into a sparse logical array of
+%       dimensions nSamples x 1. If "label" contains any non-negative
+%       values, will return an nSamples x n array where n is the number of
+%       unique non-negative labels.
+%
+%   Spk.get_waveforms(v,waveDur) returns a new object with waveforms of
+%       duration waveDur (seconds) extracted from the data v, centered at
+%       each spike index. If Spk is an object array and v has the same
+%       number of columns as the length of Spk, then the waveforms for each
+%       object are obtained from each consecutive column in v.
+%
+%   Spk.align(v,waveDur,refDur) wrapper function for ALIGNWAVEFORMS. Aligns
+%       each spike within a waveDur window (seconds). Spike indices that
+%       coincide within refDur seconds are removed.
+%
+%   Spk.cluster(nPC,maxClus) clusters waveforms using a Dirichlet-Process
+%       Gaussian Mixture Model with nPC features and a truncation of
+%       maxClus on the number of allowable latent clusters. Calls
+%       MIXGAUSSVB to perform variational inference.
+%
+%
+%
+% EXAMPLE(S) 
+%
+%
+% IMPLEMENTATION
+% Other m-files required: none
+% Subfunctions: ALIGNWAVEFORMS, RMVOUTLIERS, SMOOTH1D, STA, HISTFUN, PLOTMARKERS, MIXGAUSSVB
+% MAT-files required: none
+%
+% SEE ALSO: ALIGNWAVEFORMS
+
+% Authors: Najja Marshall
+% Emails: njm2149@columbia.edu
+% Dated:
+
 classdef Spike
     properties
         Fs = 1e3

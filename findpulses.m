@@ -111,6 +111,9 @@ for ii = 1:prod(szYP(2:end))
     
     % initial pulse estimate
     [~,loc] = findpeaks(z(:,indices{:}));
+    if isempty(loc)
+        continue
+    end
     isPeak = false(size(yPerm,1),1);
     isPeak(loc) = true;
     

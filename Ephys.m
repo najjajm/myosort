@@ -41,6 +41,8 @@
 %       can also be specified as 'rand', in which case a random trial
 %       number will be drawn and returned (trialNo)
 %
+%   [Eph,v] = Eph.cat_trials ...
+%
 %   Eph.rect rectifies (i.e. takes absolute value) the data array
 %
 %   Eph.filt(...) is a flexible method for filtering the data
@@ -69,13 +71,13 @@
 %       plots as a set of vertically stacked subplots with linked x-axes.
 %       plot(...,'fig',code) clears current axes if code is 'clf' or opens
 %           a new figure if code is 'new'
-%       plot(...,'sigma',code) clears current axes if code is 'clf' or opens
-%           a new figure if code is 'new'
-%       plot(...,'fig',code) clears current axes if code is 'clf' or opens
-%           a new figure if code is 'new'
-%       plot(...,'fig',code) clears current axes if code is 'clf' or opens
-%           a new figure if code is 'new'
-%
+%       plot(...,'sigma',sig) overlays a horizontal line at y = +/- sig
+%           (useful for visualizing the threshold set by particular
+%           multiples of the noise standard deviation)
+%       plot(...,'Spk',S) overlays markers at the indices contained in the 
+%           Spike object, S
+%       plot(...,'Neu',N) overlays waveforms for each unit contained in the
+%           Neuron object, N
 %
 %
 % EXAMPLE(S) 
@@ -91,6 +93,7 @@
 % Authors: Najja Marshall
 % Emails: njm2149@columbia.edu
 % Dated:
+
 classdef Ephys
     properties (Access = public)
         Fs = 1e3

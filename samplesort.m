@@ -106,10 +106,10 @@ unqSpkIdx = spkIdx(unitNo);
 %% Get wave template
 
 WAVE_DUR = 20e-3; % seconds
-waveLen = round(WAVE_DUR*Eph.Fs);
+waveLen = round(WAVE_DUR*EMG.Fs);
 
-waveforms = sta(Eph.data,unqSpkIdx,waveLen);
-w = wavetemplate(waveforms);
+waveforms = sta(EMG.data,unqSpkIdx,waveLen);
+[w,srtIdx] = wavetemplate(waveforms,'plot',true,'sort',true);
 
 %% Manually prune noise templates
 
@@ -148,6 +148,8 @@ Cinv = (Cn + eye(size(Cn,1))*FUDGE_FACTOR)^(-1);
 
 % testing
 % botm(double(Eph.range([0 5]).data), Eph.Fs, w, Cinv, 'plot',{'fit','dis','res','resen'});
+
+% w = w(:,:,remUnit);
 
 [sEst,~,resEner] = botm(double(Eph.data),Eph.Fs,w,Cinv,'verbose',true);
 

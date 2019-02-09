@@ -30,7 +30,7 @@
 % Emails: njm2149@columbia.edu
 % Dated:
 
-function vn = getnoise(v, Fs, varargin)
+function [vn,xLim] = getnoise(v, Fs, varargin)
 %% Parse inputs
 
 % initialize input parser
@@ -44,7 +44,7 @@ P.FunctionName = 'FUNCTIONTEMPLATE';
 addRequired(P, 'v', @isnumeric)
 addRequired(P, 'Fs', @isscalar)
 % addOptional(P, 'optIn', default, validationFunction)
-% addParameter(P, 'parameterName', default, validationFunction)
+addParameter(P, 'normalized', false, @islogical)
 
 % clear workspace (parser object retains the data while staying small)
 parse(P, v, Fs, varargin{:});
@@ -55,7 +55,7 @@ clear ans varargin
 [~, nChannels] = size(v);
 
 % locate spikes
-spkIdx = findpulses(v,Fs);
+spkIdx = findpulses(v,Fs,'normalized',P.Results.normalized);
 
 % smooth spike train
 s = cell2mat(cellfun(@(idx) sparse(idx,1,true,size(v,1),1),spkIdx,'uni',false));
@@ -86,5 +86,7 @@ cent = round(mean(noiseEdges(maxIdx,:)));
 covLen = min(noiseLen(maxIdx),Fs);
 covLen = covLen + mod(covLen,2);
 covFrame = cent+(-covLen/2:covLen/2-1);
+
+xLim = covFrame([1 end])/Fs;
 
 vn = cell2mat(cellfun(@(ii) v(covFrame,ii),num2cell(1:nChannels),'uni',false));
