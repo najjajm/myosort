@@ -1,31 +1,63 @@
-%% FINDPULSES find pulses in data
-% Detects pulses via peak detection on the de-noised signal. Pulses are
-% detected along the largest input dimension.
+%% FINDPULSES find pulses
+% Detects pulse events in time series data along any singular dimension. 
+% First, an estimate of the standard deviation of the noise [Donoho & 
+% Johnstone, 1994] is used to determine a threshold for denoising the data.
+% Then, a sequence of peak finding and smoothing operations are used to 
+% identify the occurence of pulses that can have mono- or multiphasic 
+% signatures.
 %
 % SYNTAX
-%   s = findpulses(Y, Fs, varargin)
+%   [loc,val,sigma] = findpulses(X, Fs, [thresh], varargin)
 %
 % REQUIRED INPUTS
-%   Y <double array>: timeseries data. Must be 1 or 2-dimensional array. 
-%   Fs < scalar numeric>: sampling frequency in Hz
+%   X (double): time series array
+%   Fs (scalar): sample frequency in Hz
 %
-% OPTIONAL INPUTS: NONE
+% OPTIONAL INPUTS:
+%   thresh (numeric): threshold (in multiples of the estimated standard
+%       deviation of the noise) that is used to denoise the data. Can
+%       either specify a single or double threshold.
 %
 % PARAMETER INPUTS
-%   'thresh' <scalar numeric>: multiplier on estimated standard deviation 
-%       of the noise (sigma). Data below thresh*sigma are set to zero
-%       (default: 4)
-%   'minWid' <scalar numeric>: minimum pulse width in seconds
-%       (default: 1e-3)
+%   'sym', <logical>: if true (default), the polarity of the data and the
+%       threshold are ignored for denoising. Otherwise, if the threshold is
+%       negative, data above it are ignored for pulse detection; if the
+%       threshold is positive, data below it are ignored.
 %
+%   'dim', <integer>: dimension along which pulses are detected
+%
+%   'sigma', <numeric>: standard deviation of the noise. If empty
+%       (default), this is estimated automatically. Otherwise, this can be
+%       provided if known in advance, but must match the size of the data
+%       array when collapsed along the detection dimension ("dim").
+%
+%   'minWid', <scalar>: minimum width of the pulse signature in seconds.
+%       This is used to smooth the denoised signal in order to account for 
+%       multiphasic features in the pulse signature. If set to 0, any peak
+%       in the data will be detected as a distinctive pulse (default: 1e-3)
+%
+%   'normalized', <logical>: indicates whether the data has been normalized
+%       by the standard deviation of the noise. If false (default),
+%       estimates or uses the provided standard deviation of the noise to 
+%       denoise the signal. Otherwise, assumes the standard deviation is 
+%       unity for all channels.
+%
+%   'outputFormat', <string>: if 'index' (default), retuns the pulse
+%       locations as indices. If 'logical', returns a boolean array of the
+%       same dimensionality as the input with true values at each pulse
+%       location.
+%   
 % OUTPUTS
-%   idx <vector>: pulse indices. If Y contains multiple channels, the
-%       indices are embeded in a cell array
-%   val <vector>: pulse values
-%   sigma <scalar double>: estimate of noise standard deviation
+%   loc (numeric or cell): indices of pulse locations. If X is a vector,
+%       loc will be returned as a numeric vector. If X contains multiple 
+%       channels, the pulse locations are embedded in a cell array.
 %
-% EXAMPLE(S) 
+%   val (numeric or cell): values of the data at each pulse index. Data
+%       type depends on the dimensionality of X, as described for loc.
 %
+%   sigma (numeric): estimate of noise standard deviation
+%
+% EXAMPLES
 %
 % IMPLEMENTATION
 % Other m-files required: none
@@ -38,7 +70,7 @@
 % Emails: njm2149@columbia.edu
 % Dated: October 2018
 
-function [loc,val,sigma] = findpulses(Y, Fs, varargin)
+function [loc,val,sigma] = findpulses(X, Fs, varargin)
 %% Parse inputs
 
 % initialize input parser
@@ -49,79 +81,79 @@ P.FunctionName = 'FINDPULSES';
 isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
 
 % add required, optional, and parameter-value pair arguments
-addRequired(P, 'Y', @(x) isnumeric(x) && isa(x,'double'))
+addRequired(P, 'X', @(x) isnumeric(x) && isa(x,'double'))
 addRequired(P, 'Fs', @(x) isscalarnum(x,0,Inf))
 addOptional(P, 'thresh', 4, @(x) (length(x)==1 && isscalarnum(x,-Inf,Inf)) || (length(x)==2 && x(1)<x(2)))
 addParameter(P, 'sym', true, @islogical)
-addParameter(P, 'dim', 1, @(x) isscalarnum(x,0,Inf) && x==round(x))
+addParameter(P, 'dim', 1, @(x) isscalarnum(x,0,ndims(X)+1) && x==round(x))
 addParameter(P, 'sigma', [], @(x) isempty(x) || isnumeric(x))
-addParameter(P, 'minWid', 1e-3, @(x) isscalarnum(x,0,1))
-addParameter(P, 'filt', true, @islogical)
+addParameter(P, 'minWid', 1e-3, @(x) isscalarnum(x,-eps,Inf))
 addParameter(P, 'normalized', false, @islogical)
-addParameter(P, 'OutputFormat', 'index', @(x) ismember(x,{'index','logical'}))
+addParameter(P, 'outputFormat', 'index', @(x) ismember(x,{'index','logical'}))
 
 % clear workspace (parser object retains the data while staying small)
-parse(P, Y, Fs, varargin{:});
+parse(P, X, Fs, varargin{:});
 clear ans varargin
 
-%%
+%% Process data
 
-szY = size(Y);
-dimY = ndims(Y);
+szX = size(X);
+dimX = ndims(X);
 
 % permute inputs to work across first dimension
-shiftOrd = [P.Results.dim,setdiff(1:dimY,P.Results.dim)];
-yPerm = permute(Y,shiftOrd);
-szYP = size(yPerm);
+shiftOrd = [P.Results.dim,setdiff(1:dimX,P.Results.dim)];
+xPerm = permute(X,shiftOrd);
+szXP = size(xPerm);
 
 % estimate standard deviation of noise
 if ~P.Results.normalized
     if isempty(P.Results.sigma)
-        sigma = median(abs(yPerm),1)/0.6745;
+        sigma = median(abs(xPerm),1)/0.6745;
     else
         sigma = P.Results.sigma;
         szSig = size(sigma);
-        assert(szSig(1)==1 && isequal(szSig(2:end),szY(2:end)));
+        assert(szSig(1)==1 && isequal(szSig(2:end),szX(2:end)),'Mismatch between input data and noise standard deviation');
         sigma = permute(sigma,shiftOrd);
     end
 else
-    sigma = ones([1,szYP(2:end)]);
+    sigma = ones([1,szXP(2:end)]);
 end
 
 % threshold signal
 if P.Results.sym
-    yRect = abs(yPerm);
-    z = yRect .* (yRect > P.Results.thresh*sigma);
+    xRect = abs(xPerm);
+    z = xRect .* (xRect > abs(P.Results.thresh(1))*sigma);
 else
     if length(P.Results.thresh) == 1
-        z = sign(P.Results.thresh)*yPerm.*(sign(P.Results.thresh)*yPerm > abs(P.Results.thresh)*sigma);
+        z = sign(P.Results.thresh)*xPerm.*(sign(P.Results.thresh)*xPerm > abs(P.Results.thresh)*sigma);
     else
-        z = yPerm .* (yPerm < P.Results.thresh(1) & yPerm > P.Results.thresh(2));
+        z = xPerm .* (xPerm < P.Results.thresh(1) & xPerm > P.Results.thresh(2));
     end
 end
 
-% find peaks in normalized rectified signal
-z = z./sigma;
-indices = cell(1,dimY-1);
+%% Find pulses
 
-[idx,val] = deal(cell([1,szYP(2:end)]));
-for ii = 1:prod(szYP(2:end))
+z = z./sigma;
+indices = cell(1,dimX-1);
+
+[idx,val] = deal(cell([1,szXP(2:end)]));
+for ii = 1:prod(szXP(2:end))
     
-    [indices{:}] = ind2sub(szYP(2:end),ii);
+    [indices{:}] = ind2sub(szXP(2:end),ii);
     
     % initial pulse estimate
     [~,loc] = findpeaks(z(:,indices{:}));
     if isempty(loc)
         continue
     end
-    isPeak = false(size(yPerm,1),1);
+    isPeak = false(size(xPerm,1),1);
     isPeak(loc) = true;
     
     % convert rectified signal to pulse train
     s = z(:,indices{:}).*isPeak;
     
     % filter pulse train by half-minimum pulse width
-    if P.Results.filt
+    if P.Results.minWid > 0
         u = smooth1D(s,Fs,'gau',true,'sd',P.Results.minWid/2);
     else
         u = s;
@@ -130,13 +162,16 @@ for ii = 1:prod(szYP(2:end))
     % find pulse values and indices as peaks in train
     [~,pkLoc] = findpeaks(u,'MinPeakHeight',1);
     idx{1,indices{:}} = pkLoc;
-    val{1,indices{:}} = yPerm(pkLoc,indices{:});
+    val{1,indices{:}} = xPerm(pkLoc,indices{:});
 end
 
-if strcmp(P.Results.OutputFormat, 'logical')
-    loc = false(szYP);
-    for ii = 1:prod(szYP(2:end))
-        [indices{:}] = ind2sub(szYP(2:end),ii);
+%% Post-processing
+
+% format outputs
+if strcmp(P.Results.outputFormat, 'logical')
+    loc = false(szXP);
+    for ii = 1:prod(szXP(2:end))
+        [indices{:}] = ind2sub(szXP(2:end),ii);
         loc(idx{1,indices{:}},indices{:}) = true;
     end
 else
@@ -145,15 +180,14 @@ else
         loc = loc{1};
     end
 end
-
 if length(val) == 1
     val = val{1};
 end
 
 % permute outputs to match input dimensions
-shiftOrdRev = zeros(1,dimY);
-for ii = 1:dimY
-    shiftOrdRev(ii) = find(szYP==szY(ii));
+shiftOrdRev = zeros(1,dimX);
+for ii = 1:dimX
+    shiftOrdRev(ii) = find(szXP==szX(ii));
 end
 sigma = permute(sigma,shiftOrdRev);
 val = permute(val,shiftOrdRev);

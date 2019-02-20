@@ -210,7 +210,7 @@ classdef Spike
             waveLen = round(waveDur*obj(1).Fs);
             waveLen = waveLen + mod(waveLen,2);
             for ii = 1:length(obj)
-                obj(ii).waveform = cell2mat(sta(v(:,ii),num2cell(obj(ii).index),waveLen));
+                obj(ii).waveform = cell2mat(spktrig(v(:,ii),num2cell(obj(ii).index),waveLen));
             end
         end
         function obj = align(obj,v,waveDur,refDur)
@@ -235,26 +235,6 @@ classdef Spike
         % -----------------------------------------------------------------
         % LABEL MANAGEMENT
         % -----------------------------------------------------------------
-        % clear
-        function obj = clr_labels(obj,varargin)
-            P = inputParser;
-            addParameter(P,'except',[],@isnumeric)
-            addParameter(P,'hold',false,@islogical)
-            parse(P,varargin{:})
-            for ii = 1:length(obj)
-                if P.Results.hold
-                    l = obj(ii).label;
-                    rmvIdx = ismember(l,setdiff(unique(l),P.Results.except));
-                    obj(ii).label(rmvIdx) = 0;
-                else
-                    lNew = zeros(obj(ii).count,1);
-                    for jj = 1:length(P.Results.except)
-                        lNew(obj(ii).label==P.Results.except(jj)) = jj;
-                    end
-                    obj(ii).label = lNew;
-                end
-            end
-        end
         % set
         function obj = set_labels(obj,allLabels,grp)
             lNew = zeros(obj.count,1,'uint8');
@@ -263,17 +243,31 @@ classdef Spike
             end
             obj.label(lNew>0) = lNew(lNew>0) + max(obj.label);
         end
-        % remove
+        % remove select labels
         function obj = rmv_labels(obj,labelNo)
-            obj.label(ismember(obj.label,labelNo)) = 0;
+            obj.label(ismember(abs(obj.label),labelNo)) = 0;
+        end
+        % clear all labels
+        function obj = clr_labels(obj,varargin)
+            P = inputParser;
+            addParameter(P,'except',[],@isnumeric)
+            parse(P,varargin{:})
+            for ii = 1:length(obj)
+                rmvNo = setdiff(unique(abs(obj(ii).label)),P.Results.except);
+                obj(ii).label(ismember(abs(obj(ii).label),rmvNo)) = 0;
+            end
+        end
+        % reset numbering
+        function obj = reset_labels(obj)
             newLabels = zeros(obj.count,1,'uint8');
             unqLabels = unique(obj.label);
             unqLabels = unqLabels(unqLabels>0);
             for ii = 1:length(unqLabels)
-                newLabels(obj.label==unqLabels(ii)) = ii;
+                newLabels(obj.label ==  unqLabels(ii)) =  ii;
+                newLabels(obj.label == -unqLabels(ii)) = -ii;
             end
             obj.label = newLabels;
-        end
+        end      
         % triage (remove outliers)
         function obj = triage(obj,cutoff)
             if length(cutoff) == 1
@@ -333,7 +327,7 @@ classdef Spike
                     end
                 end
                 [wSim,nearestTemplate] = max(wSim,[],2);
-                obj(ii).label(unsrtIdx(wSim>thresh(ii))) = nearestTemplate(wSim>thresh(ii));
+                obj(ii).label(unsrtIdx(wSim>thresh(ii))) = obj(ii).Clus.id(nearestTemplate(wSim>thresh(ii)));
             end
         end
         function chanNo = unit_channel(obj)
@@ -357,53 +351,66 @@ classdef Spike
             addParameter(P,'sort','energy',@(x) ischar(x) && ismember(x,{'id','size','energy','entropy'}))
             parse(P,varargin{:})
             
-            % mask
-            mask = P.Results.mask;
-            if isempty(mask)
-                mask = true(size(obj.waveform,1),1);
-            end
-            
-            if nnz(unique(obj.label)>0) < 2
-                mask = (obj.label == max(unique(obj.label)));
-                histfun(obj.waveform(mask,:),'plot',true,'lim',P.Results.lim);
-                title(sprintf('%i waveforms',nnz(mask)))
-                
+            if length(obj) > 1
+                figure
+                nCol = ceil(sqrt(length(obj)));
+                nRow = ceil(length(obj)/nCol);
+                for ii = 1:length(obj)
+                    if obj(ii).count > 0
+                        subplot(nRow,nCol,ii)
+                        histfun(obj(ii).waveform,'plot',true,'lim',P.Results.lim);
+                    end
+                end
             else
-                if isempty(P.Results.label)
-                    unitNo = obj.Clus.id;
+                
+                % mask
+                mask = P.Results.mask;
+                if isempty(mask)
+                    mask = true(size(obj.waveform,1),1);
+                end
+                
+                if nnz(unique(obj.label)>0) < 2
+                    mask = (obj.label == max(unique(obj.label)));
+                    histfun(obj.waveform(mask,:),'plot',true,'lim',P.Results.lim);
+                    title(sprintf('%i waveforms',nnz(mask)))
+                    
                 else
-                    unitNo = P.Results.label;
-                end
-                nUnits = length(unitNo);
-                
-                [~,srtIdx] = sort(obj.Clus.(P.Results.sort));
-                
-                plotsPerPage = P.Results.ppp;
-                if isempty(plotsPerPage)
-                    plotsPerPage = nUnits;
-                end
-                nPages = ceil(nUnits/plotsPerPage);
-                
-                nCol = ceil(sqrt(plotsPerPage));
-                nRow = ceil(plotsPerPage/nCol);
-                
-                for ff = 1:nPages
-                    figure                 
-                    for idx = 1:plotsPerPage
-                        ii = idx+plotsPerPage*(ff-1);
-                        if ii > nUnits
-                            break
+                    if isempty(P.Results.label)
+                        unitNo = obj.Clus.id;
+                    else
+                        unitNo = P.Results.label;
+                    end
+                    nUnits = length(unitNo);
+                    
+                    [~,srtIdx] = sort(obj.Clus.(P.Results.sort));
+                    
+                    plotsPerPage = P.Results.ppp;
+                    if isempty(plotsPerPage)
+                        plotsPerPage = nUnits;
+                    end
+                    nPages = ceil(nUnits/plotsPerPage);
+                    
+                    nCol = ceil(sqrt(plotsPerPage));
+                    nRow = ceil(plotsPerPage/nCol);
+                    
+                    for ff = 1:nPages
+                        figure
+                        for idx = 1:plotsPerPage
+                            ii = idx+plotsPerPage*(ff-1);
+                            if ii > nUnits
+                                break
+                            end
+                            if nUnits > 1
+                                subplot(nRow,nCol,idx)
+                            end
+                            if nnz(obj.label==unitNo(srtIdx(ii))) <= 1
+                                continue
+                            end
+                            histfun(obj.waveform(obj.label==unitNo(srtIdx(ii)),:),'plot',true,'lim',P.Results.lim);
+                            cid = obj.Clus.id == obj.Clus.id(srtIdx(ii));
+                            title(sprintf('unit %i\nn=%i, H=%.2f, |w|^2=%.2f',unitNo(srtIdx(ii)),...
+                                obj.Clus.size(cid), obj.Clus.entropy(cid), obj.Clus.energy(cid)))
                         end
-                        if nUnits > 1
-                            subplot(nRow,nCol,idx)
-                        end
-                        if nnz(obj.label==unitNo(srtIdx(ii))) <= 1
-                            continue
-                        end
-                        histfun(obj.waveform(obj.label==unitNo(srtIdx(ii)),:),'plot',true,'lim',P.Results.lim);
-                        cid = obj.Clus.id == obj.Clus.id(srtIdx(ii));
-                        title(sprintf('unit %i\nn=%i, H=%.2f, |w|^2=%.2f',unitNo(srtIdx(ii)),...
-                            obj.Clus.size(cid), obj.Clus.entropy(cid), obj.Clus.energy(cid)))
                     end
                 end
             end
@@ -411,8 +418,6 @@ classdef Spike
         
         % plot features
         function plot_feat(obj,featNo,colorLabels)
-            M = plotmarkers();
-            
             if nargin == 2
                 colorLabels = true;
             end
@@ -433,25 +438,26 @@ classdef Spike
             end
             
             if colorLabels
+                % generate set of point markers
+                colors = brewermap(8,'Set1');
+                markers = {'.','*','o','+','x','s','d','^','v','>','<','p','h'};
+                pm = reshape(repmat(markers, size(colors,1), 1),...
+                    size(colors,1)*length(markers), 1);
+                pm = [pm, repmat({'color'},size(pm,1),1), repmat(mat2cell(colors,ones(size(colors,1),1),3),length(markers),1)];
+                pm = [{'.','color',0.8*ones(1,3)};pm];
+                % plot
                 hold on
-                uqLab = unique(obj.label);
-                for ii = 1:length(uqLab)
-                    if uqLab(ii)==0 && nnz(uqLab)>0
-                        pm = {'k.','color',0.8*ones(1,3)};
-                    else
-                        pm = M.mark(ii);
-                    end
-                    
-                    lid = obj.label==uqLab(ii);
-                    
+                clusNo = setdiff(unique(abs(obj.label)), min(obj.label):-1);
+                nClus = length(clusNo);
+                for ii = 1:nClus                    
+                    lid = obj.label==clusNo(ii);
                     if nFeat == 2
-                        plot(featVal{1}(lid),featVal{2}(lid),pm{:})
+                        plot(featVal{1}(lid),featVal{2}(lid),pm{ii,:})
                     else
-                        plot3(featVal{1}(lid),featVal{2}(lid),featVal{3}(lid),pm{:})
+                        plot3(featVal{1}(lid),featVal{2}(lid),featVal{3}(lid),pm{ii,:})
                     end
                 end
-                
-                legend([{'unsorted'},cellfun(@(n) sprintf('MU %i',n), num2cell(uqLab(uqLab>0)'), 'uni', false)])
+                legend([{'unsorted'},cellfun(@(n) sprintf('MU %i',n), num2cell(obj.Clus.id), 'uni', false)])
             else
                 if nFeat == 2
                     plot(featVal{1},featVal{2},'k.')
@@ -475,8 +481,6 @@ classdef Spike
             addParameter(P,'unit',[],@isnumeric)
             parse(P,varargin{:})
             
-            M = plotmarkers();
-            
             lenObj = length(obj);
             
             nCol = ceil(sqrt(lenObj));
@@ -498,15 +502,17 @@ classdef Spike
                     continue
                 end
                 
+                cmap = brewermap(nUnits,'Spectral');
+                
                 unitCount = cellfun(@(x) nnz(obj(ii).label==x), num2cell(unitNo), 'uni', false);
                 
                 t = 1e3*(1:obj(ii).waveLength)/obj(ii).Fs;
                 plot(t([1 end]),[0 0],'--','color',0.85*[1 1 1],'linewidth',0.5)
                 fh = zeros(1,nUnits);
                 for jj = 1:nUnits
-                    fh(jj) = plot(t, obj(ii).template(:,unitNo(jj),1), M.line{jj});
-                    patch([t,fliplr(t)], [permute(sum(obj(ii).template(:,unitNo(jj),:),3),[2 1 3]),...
-                        fliplr(permute(-diff(obj(ii).template(:,unitNo(jj),:),[],3),[2 1 3]))], M.line{jj}(1),...
+                    fh(jj) = plot(t, obj(ii).template(:,jj,1), 'color', cmap(jj,:));
+                    patch([t,fliplr(t)], [permute(sum(obj(ii).template(:,jj,:),3),[2 1 3]),...
+                        fliplr(permute(-diff(obj(ii).template(:,jj,:),[],3),[2 1 3]))], cmap(jj,:),...
                         'EdgeAlpha',0, 'FaceAlpha',0.125)
                 end
                 legend(fh, cellfun(@(n,nc) sprintf('unit %i |%i|',n,nc), num2cell(unitNo), unitCount, 'uni', false))
@@ -522,14 +528,14 @@ classdef Spike
             obj.waveLength = size(obj.waveform,2);
         end
         function obj = update_template(obj)
-            uqLab = unique(obj.label);
-            if nnz(uqLab)>0
-                obj.template = zeros(obj.waveLength, nnz(uqLab), 2);
-                clusNo = uqLab(uqLab>0);
-                for ii = 1:size(obj.template,2)
+            clusNo = setdiff(unique(obj.label), min(obj.label):0);
+            nClus = length(clusNo);
+            if nClus > 0
+                obj.template = zeros(obj.waveLength, nClus, 2);
+                for ii = 1:nClus
                     w = obj.waveform(obj.label==clusNo(ii),:);
                     obj.template(:,ii,1) = mean(double(w),1);
-                    obj.template(:,ii,2) = std(double(w),[],1)/sqrt(size(w,1));                    
+                    obj.template(:,ii,2) = std(double(w),[],1)/sqrt(size(w,1)-1);                    
                 end
             else
                 obj.template = [];
@@ -537,8 +543,10 @@ classdef Spike
         end
         function obj = update_feature(obj)
             [~,obj.feature] = pca(double(obj.waveform));
-            obj.maxFeat = min(obj.maxFeat, size(obj.feature,2));
-            obj.feature = obj.feature(:,1:obj.maxFeat);
+            if size(obj.feature,2) > 0
+                obj.maxFeat = min(obj.maxFeat, size(obj.feature,2));
+                obj.feature = obj.feature(:,1:obj.maxFeat);
+            end
         end
         function obj = update_clus(obj)
             if nnz(obj.label) == 0
@@ -546,7 +554,7 @@ classdef Spike
             end
             obj.Clus = struct('dim',{[]},'id',{[]},'size',{[]},'energy',{[]},'std',{[]},'entropy',{[]});
             obj.Clus.dim = obj.clusDim;
-            obj.Clus.id = setdiff(unique(obj.label),min(unique(obj.label)):0);
+            obj.Clus.id = setdiff(unique(obj.label), min(obj.label):0);
             obj.Clus.id = obj.Clus.id(:)';
             [obj.Clus.size, obj.Clus.energy, obj.Clus.entropy] = deal(zeros(size(obj.Clus.id)));
             obj.Clus.std = zeros(length(obj.Clus.id),obj.waveLength);

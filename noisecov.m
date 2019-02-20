@@ -1,23 +1,33 @@
 %% NOISECOV noise covariance
-% Function details
+% Estimates spatiotemporal noise covariance matrix from a segment of 
+% quiescent time series data. Uses the method of [Pouzat et al., 2002],
+% which leverages the observation that the noise covariance for
+% multichannel data is itself a Toeplitz matrix constructed from N blocks
+% of Toeplitz matrices where N is the number of channels in the data. Each
+% block is computed using the auto-/cross-correlation functions of
+% the noise segment within/across channels. These functions are then
+% truncated to a specified duration in order to construct blocks of
+% arbitrary size. To ensure that the covariance matrix is well conditioned,
+% the truncation duration should be much less than the duration of the
+% noise segments.
 %
 % SYNTAX
-%   outputs = functiontemplate(inputs, varargin)
+%   Cn = noisecov(Xn, Fs, dur, varargin)
 %
 % REQUIRED INPUTS
-%   reqIn <class>: description
+%   Xn (numeric): array of noisy time series data (channels x samples)
+%   Fs (scalar): sample frequency in Hz
+%   dur (scalar): duration in seconds of each block in the covariance
+%       matrix. (For spike sorting, set to the intended waveform duration)
 %
-% OPTIONAL INPUTS
-%   optIn <class>: description
+% OPTIONAL INPUTS: none
 %
-% PARAMETER INPUTS
-%   'parameterName' <class>: description (default: )
+% PARAMETER INPUTS: none
 %
 % OUTPUTS
-%   out1 <class>: description
+%   Cn (numeric): noise covariance matrix
 %
 % EXAMPLE(S) 
-%
 %
 % IMPLEMENTATION
 % Other m-files required: none
@@ -28,50 +38,45 @@
 
 % Authors: Najja Marshall
 % Emails: njm2149@columbia.edu
-% Dated:
+% Dated: February 2019
 
-function Cn = noisecov(xn, Fs, dur, varargin)
+function Cn = noisecov(Xn, Fs, dur, varargin)
 %% Parse inputs
 
 % initialize input parser
 P = inputParser;
 P.FunctionName = 'NOISECOV';
 
-% validation functions
-% isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
-
 % add required, optional, and parameter-value pair arguments
-addRequired(P, 'xn', @isnumeric)
+addRequired(P, 'Xn', @isnumeric)
 addRequired(P, 'Fs', @isscalar)
 addRequired(P, 'dur', @isscalar)
-% addParameter(P, 'parameterName', default, validationFunction)
 
 % clear workspace (parser object retains the data while staying small)
-parse(P, xn, Fs, dur, varargin{:});
+parse(P, Xn, Fs, dur, varargin{:});
 clear ans varargin
 
 %%
 
+[nSamples, nChannels] = size(Xn);
+
 % ensure each block has an even number of samples
 blockLen = round(Fs*dur);
 blockLen = blockLen + mod(blockLen,2);
-
-covLen = size(xn,1);
-if mod(covLen,2) == 1
-    xn(end,:) = [];
-    covLen = covLen-1;
+if mod(nSamples,2) == 1
+    Xn(end,:) = [];
+    nSamples = nSamples-1;
 end
 
-nChannels = size(xn,2);
-
+% estimate covariance
 Cn = zeros(blockLen*nChannels);
 for ii = 1:nChannels
     for jj = 1:nChannels
         if jj >= ii
             
             % auto/cross-correlation
-            xc = ifft(abs(fft(xn(:,ii),2*covLen)).*abs(fft(xn(:,jj),2*covLen)));
-            xc = xc(1:blockLen)/covLen;
+            xc = ifft(abs(fft(Xn(:,ii),2*nSamples)).*abs(fft(Xn(:,jj),2*nSamples)));
+            xc = xc(1:blockLen)/nSamples;
             
             % toeplitz correlation matrix
             M = toeplitz(xc);
@@ -86,36 +91,3 @@ end
 
 % symmetrize
 Cn = triu(Cn) + triu(Cn,1)';
-
-
-%% Testing
-
-% N_SAMP = 1e4;
-% noiseSample = zeros(size(C,1),N_SAMP);
-% patchIdx = datasample(find(noiseLen>blockLen),N_SAMP,'Replace',false);
-% frame = -blockLen/2:blockLen/2-1;
-% for ii = 1:N_SAMP
-%     y = zeros(blockLen,nChannels);
-%     for jj = 1:nChannels
-%         y(:,jj) = v(round(noiseLen(patchIdx(ii))/2) + frame,jj);
-%     end
-%     noiseSample(:,ii) = reshape(y,blockLen*nChannels,1);
-% end
-% 
-% %%
-% 
-% U = chol(C);
-% 
-% %%
-% 
-% x = 0:3e4;
-% z = U*noiseSample;
-% zs = sum(z.^2,1);
-% zp = histc(zs,x);
-% zp = zp/sum(zp);
-% y = chi2pdf(x,size(z,1));
-% %%
-% figure
-% plot(x,cumsum(zp),'k');
-% hold on
-% plot(x,cumsum(y),'r')

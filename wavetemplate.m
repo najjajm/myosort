@@ -1,36 +1,40 @@
-%% WAVETEMPLATE full function name
-% Function details
+%% WAVETEMPLATE waveform template
+% Constructs the multi-channel waveform template from a set of waveforms
 %
 % SYNTAX
-%   outputs = functiontemplate(inputs, varargin)
+%   [u, srtIdx] = wavetemplate(w, varargin)
 %
 % REQUIRED INPUTS
-%   reqIn <class>: description
+%   w (cell): array of waveforms of dimensions [units x channels]
 %
-% OPTIONAL INPUTS
-%   optIn <class>: description
+% OPTIONAL INPUTS: none
 %
 % PARAMETER INPUTS
-%   'parameterName' <class>: description (default: )
+%   'sort', <logical>: if true, sorts set of templates by their average
+%       energy across channels (default: false)
+%   'plot', <logical>: if true, plots templates (default: false)
 %
 % OUTPUTS
-%   out1 <class>: description
+%   u (numeric): 3D multi-channel template array of dimensions 
+%       [wave length x channels x units]
+%   srtIdx (numeric): vector of indices corresponding to the sort order (if
+%       applied)
 %
 % EXAMPLE(S) 
 %
 %
 % IMPLEMENTATION
-% Other m-files required: none
-% Subfunctions: none
+% Other m-files required: PLOTWAVETEMPLATE
+% Subfunctions: PLOTWAVETEMPLATE
 % MAT-files required: none
 %
-% SEE ALSO:
+% SEE ALSO: PLOTWAVETEMPLATE
 
 % Authors: Najja Marshall
 % Emails: njm2149@columbia.edu
-% Dated:
+% Dated: February 2019
 
-function [u,srtIdx] = wavetemplate(w, varargin)
+function [u, srtIdx] = wavetemplate(w, varargin)
 %% Parse inputs
 
 % initialize input parser
@@ -39,7 +43,6 @@ P.FunctionName = 'WAVETEMPLATE';
 
 % add required, optional, and parameter-value pair arguments
 addRequired(P, 'w', @iscell)
-addOptional(P, 'unitNo', [], @isnumeric)
 addParameter(P, 'sort', false, @islogical)
 addParameter(P, 'plot', false, @islogical)
 
@@ -47,24 +50,25 @@ addParameter(P, 'plot', false, @islogical)
 parse(P, w, varargin{:});
 clear ans varargin
 
-%% Construct template
+%%
 
 [nUnits,nChannels] = size(w);
-waveLen = size(w{1},2);
 
 % average and reshape to length x channel x unit
 u = cellfun(@(x) mean(x,1)',w,'uni',false);
 u = cell2mat(reshape(u',1,nChannels,nUnits));
 
+% sort by energy
 if P.Results.sort
-    % resort by wave energy
     ener = squeeze(sum(u.^2,1));
     ener = mean(ener,1);
     [~,srtIdx] = sort(ener);
     u = u(:,:,srtIdx);
+else
+    srtIdx = 1:nUnits;
 end
 
-% Plot
+% plot
 if P.Results.plot
     plotwavetemplate(u)
 end

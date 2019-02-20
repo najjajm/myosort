@@ -1,23 +1,45 @@
 %% MUTUALINFO mutual information
-% Function details
+% Computes the mutual information between all pairs of N spike trains. 
+% Achieves significant speedup when computing the mutual information over 
+% a range of lags by using the spike indices to estimate the joint state
+% probabilities.
 %
 % SYNTAX
-%   outputs = functiontemplate(inputs, varargin)
+%   [MI, normMI] = mutualinfo(spikes, Fs, varargin)
 %
 % REQUIRED INPUTS
-%   reqIn (class) - description
+%   spikes (logical or cell array): if logical, corresponds to an array of
+%       spike trains (samples x trains). If cell, each cell contains the
+%       spike indices for each train.
+%
+%   Fs (scalar): sample frequency in Hz
 %
 % OPTIONAL INPUTS
-%   optIn (class) - description
+%   nSamples (integer): number of sample points in data from which spikes
+%       were detected. If empty, inferred by the size of the spike array
+%       (if logical) or taken to be the maximum spike index across all
+%       trains (if spikes is cell).
 %
 % PARAMETER INPUTS
-%   'parameterName' <class> - description (default: )
+%   'maxLag', <scalar>: maximum lag between spike trains in seconds. Mutual
+%       information will be computed for each lag between +/- the maximum.
+%       (default: 5e-3)
+%
+%   'group', <numeric>: vector of group assignments for each spike train.
+%       Mutual information will not be computed between pairs of trains
+%       belonging to the same group. By default, each train is assigned to
+%       its own group.
 %
 % OUTPUTS
-%   out1 (class) - description
+%   MI (numeric): 3D array containing the mutual information between each
+%       spike train over all lags. Dimensionality: N x N x (1+2*Fs*maxLag)
+%       if N > 2. Otherwise, returned as a vector over all lags.
+%
+%   normMI (numeric): 2D array containing the maximum mutual information
+%       between each train across all lags, normalized by the sum of the
+%       entropies of each train (the maximum mutual information possible).
 %
 % EXAMPLE(S) 
-%
 %
 % IMPLEMENTATION
 % Other m-files required: none
@@ -28,7 +50,7 @@
 
 % Authors: Najja Marshall
 % Emails: njm2149@columbia.edu
-% Dated:
+% Dated: February 2019
 
 function [MI, normMI] = mutualinfo(spikes, Fs, varargin)
 %% Parse inputs
@@ -43,7 +65,7 @@ isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
 % add required, optional, and parameter-value pair arguments
 addRequired(P, 'spikes', @(x) islogical(x) || iscell(x))
 addRequired(P, 'Fs', @(x) isscalarnum(x,0,Inf))
-addOptional(P, 'nT', [], @(x) isscalarnum(x,0,Inf))
+addOptional(P, 'nSamples', [], @(x) isscalarnum(x,0,Inf) && x==round(x))
 addParameter(P, 'maxLag', 5e-3, @(x) isscalarnum(x,0,1))
 addParameter(P, 'group', [], @(x) isnumeric(x) && (length(x)==size(spikes,2) || length(x)==length(spikes)))
 
@@ -56,7 +78,7 @@ clear ans varargin
 grp = P.Results.group;
 if islogical(spikes)
     % input dimensions
-    [nDataPoints, nUnits] = size(spikes);
+    [nSamples, nUnits] = size(spikes);
     
     % extract spike indices
     spikeIdx = cell(nUnits,1);
@@ -68,11 +90,11 @@ if islogical(spikes)
         grp = (1:size(spikes,2))';
     end
 else
-    nDataPoints = P.Results.nT;
+    nSamples = P.Results.nSamples;
     spikeIdx = spikes(:);
-    if isempty(nDataPoints)
+    if isempty(nSamples)
         warning('Data length unspecified. Using maximum spike index.')
-        nDataPoints = max(cellfun(@max,spikes));
+        nSamples = max(cellfun(@max,spikes));
     end
     nUnits = length(spikeIdx);
     if isempty(grp)
@@ -85,7 +107,7 @@ H = @(prob) -sum(arrayfun(@(p) min(0,p*log2(p)), prob));
 
 % marginal (neural) entropies
 nSpks = cellfun(@length, spikeIdx);
-pNeu = nSpks/nDataPoints;
+pNeu = nSpks/nSamples;
 pNeu = [pNeu, 1-pNeu];
 Hneu = cellfun(@(p) H(p), mat2cell(pNeu,ones(nUnits,1),2));
 
@@ -99,7 +121,6 @@ nLags = length(lags);
 % lagged mutual information
 MI = zeros(nUnits,nUnits,nLags);
 for ii = 1:nUnits
-    t0 = tic;
     for jj = 1:nUnits
         if jj>ii && grp(ii)~=grp(jj)
             
@@ -111,7 +132,7 @@ for ii = 1:nUnits
                 nnz( ismember(spikeIdx{ii},sj)),...
                 nnz(~ismember(spikeIdx{ii},sj)),...
                 nnz(~ismember(sj,spikeIdx{ii}))],sjLagged,'uni',false);
-            pij = cellfun(@(x) x/nDataPoints, nij,'uni',false);
+            pij = cellfun(@(x) x/nSamples, nij,'uni',false);
             pij = cellfun(@(p) [p, 1-sum(p)], pij,'uni',false);
             
             % joint entropy

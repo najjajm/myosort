@@ -77,12 +77,13 @@ for ii = 1:nClus
         y = X(clusIdx,:);
         
         % 2D histogram
-        [counts,bins] = histfun(y);
+        [counts,bins] = histfun(y,'lim',2*[floor(min(y(:))),ceil(max(y(:)))]);
         nBins = length(bins);
         counts = mat2cell(counts, nBins, ones(1,T));
         
         % filter counts
-        filtCounts = cellfun(@(x) smooth1D(x,1,'gau','sd',25), counts, 'uni', false);
+        filtSD = ceil(mean(std(y,[],2)));
+        filtCounts = cellfun(@(x) smooth1D(x,1,'gau','sd',filtSD), counts, 'uni', false);
         
         % threshold
         normCounts = cell2mat(filtCounts)./cellfun(@sum,filtCounts);

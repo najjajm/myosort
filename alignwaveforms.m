@@ -1,6 +1,6 @@
-%% ALIGNWAVEFORMS - align spike waveforms
+%% ALIGNWAVEFORMS align spike waveforms
 % Aligns spike waveforms from time series data. By default, shifts spike
-% indices to be centered at the point of max squared amplitude for each
+% indices to be centered at the point of maximum squared amplitude for each
 % waveform, but alignment can also be performed on the smoothed waveform
 % envelopes. Since each shifting operation can introduce new maxima to the
 % waveform window, alignment is run for several iterations until the
@@ -12,37 +12,40 @@
 % SYNTAX
 %   [waves, waveIdx] = alignwaveforms(X, Fs, spkIdx, varargin)
 %
-% INPUTS
-%   X (vector double) - time series data
-%   Fs (scalar) - sample frequency in Hz
-%   spkIdx (vector double) - spike locations
+% REQUIRED INPUTS
+%   X (numeric): time series array (channels x samples)
+%   Fs (scalar): sample frequency in Hz
+%   spkIdx (numeric): spike indices
 %
-% VARIABLE INPUTS
-%   (...,'method',alignMethod) - if 'amp', aligns to the index corresponding
-%       to the largest squared amplitude for each waveform. If 'env',
-%       aligns to the index corresponding to the peak in the waveform
-%       envelope (post-rectification and filtering). (default: 'amp')
-%   (...,'waveDur',waveDur) - waveform duration in seconds (default: 3e-3)
-%   (...,'refDur',refDur) - refractory duration in seconds (default: 0)
-%   (...,'tol',pAligned) - tolerance on proportion of waveforms properly
-%       aligned. Alignment stops after tolerance reached (or number of
-%       iterations hits limit). (default: 0.99)
-%   (...,'maxIter',maxIter) - limit on number of passes through the data
+% OPTIONAL INPUTS: none
+%
+% PARAMETER INPUTS
+%   'method', <char>: if 'amp' (default), aligns to the index 
+%       corresponding to the largest squared amplitude for each waveform. 
+%       If 'env', aligns to the index corresponding to the peak in the 
+%       waveform envelope (post-rectification and filtering)
+%
+%   'waveDur', <scalar>: waveform duration in seconds (default: 3e-3)
+%
+%   'refDur', <scalar>: refractory duration in seconds (default: 0)
+%
+%   'tol', <scalar>: tolerance on proportion of waveforms properly aligned. 
+%       Must be bounded between 0 and 1. Alignment stops after tolerance is
+%       reached (or number of iterations hits limit). (default: 0.99)
+%
+%   'maxIter', <integer>: limit on number of passes through the data
 %       before alignment stops. (default: 10)
 %
 % OUTPUTS
-%   waves (array) - waveform shapes (observations x wave length)
-%   spkIdx (vector double) - spike indices
-%
-% EXAMPLE(S) 
-%
+%   waves (numeric): array of waveform shapes (observations x wave length)
+%   spkIdx (numeric): aligned spike indices
 %
 % IMPLEMENTATION
-% Other m-files required: STA
-% Subfunctions: STA
+% Other m-files required: SPKTRIG
+% Subfunctions: SPKTRIG
 % MAT-files required: none
 %
-% SEE ALSO: SPIKE, STA
+% SEE ALSO: SPIKE, SPKTRIG
 
 % Authors: Najja Marshall
 % Emails: njm2149@columbia.edu
@@ -59,19 +62,18 @@ P.FunctionName = 'ALIGNWAVEFORMS';
 isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
 
 % add required, optional, and parameter-value pair arguments
-addRequired(P, 'X', @isnumeric);
-addRequired(P, 'Fs', @isscalar);
-addRequired(P, 'spkIdx', @isnumeric);
+addRequired(P, 'X', @isnumeric)
+addRequired(P, 'Fs', @(x) isscalarnum(x,0,Inf))
+addRequired(P, 'spkIdx', @isnumeric)
 addParameter(P, 'method', 'amp', @(x) ischar(x) && ismember(x,{'amp','env'}))
-addParameter(P, 'waveDur', 3e-3, @(x) isscalarnum(x,0,50e-3));   % waveform duration (sec)
-addParameter(P, 'refDur', 0, @(x) isscalarnum(x,0,10e-3));    % refractory duration (sec)
-addParameter(P, 'tol', 0.99, @(x) isscalarnum(x,0,1)); % tolerance (percent waveforms aligned)
-addParameter(P, 'maxIter', 10, @(x) isscalarnum(x,1,Inf))
+addParameter(P, 'waveDur', 3e-3, @(x) isscalarnum(x,0,50e-3))
+addParameter(P, 'refDur', 0, @(x) isscalarnum(x,0,10e-3))
+addParameter(P, 'tol', 0.99, @(x) isscalarnum(x,0,1))
+addParameter(P, 'maxIter', 10, @(x) isscalarnum(x,0,Inf) && x==round(x))
 
 % clear workspace (parser object retains the data while staying small)
 parse(P, X, Fs, spkIdx, varargin{:});
 clear ans varargin
-
 
 %% Extract waveforms, centered on spike locations
 
@@ -88,7 +90,6 @@ spkIdx([false; diff(spkIdx) < refLen]) = [];
 waveLen = round(Fs * P.Results.waveDur);
 waveLen = waveLen + mod(waveLen,2);
 
-
 %% Center waveforms and remove putative overlaps
 
 if size(X,1)>size(X,2)
@@ -96,7 +97,7 @@ if size(X,1)>size(X,2)
 end
 
 % extract initial waveforms
-[waves,spkIdx] = sta(X,num2cell(spkIdx),waveLen);
+[waves,spkIdx] = spktrig(X,num2cell(spkIdx),waveLen);
 
 pAligned = 0;
 iter = 0;
@@ -124,7 +125,7 @@ while pAligned < P.Results.tol && iter < P.Results.maxIter
     maxLoc(refViol) = [];
     
     % update waveforms
-    [waves,spkIdx] = sta(X,num2cell(spkIdx),waveLen);
+    [waves,spkIdx] = spktrig(X,num2cell(spkIdx),waveLen);
     
     % percent aligned
     pAligned = nnz(cell2mat(maxLoc)==waveLen/2)/length(spkIdx);

@@ -1,64 +1,72 @@
 %% GETNOISE get noise
-% Isolates noisy patches from Ephys data
+% Identifies simultaneous patch of pure noise across all channels in time 
+% series data. Uses findpulses to locate all pulse events, identifies the
+% longest quiescent period in the data across all channels, then returns
+% a section of the data centered on that noisy patch.
 %
 % SYNTAX
-%   outputs = getnoise(v, varargin)
+%   outputs = getnoise(X, Fs, [dur], varargin)
 %
 % REQUIRED INPUTS
-%   reqIn <class>: description
+%   X (double): time series array (samples x channels)
+%   Fs (scalar): sample frequency in Hz
 %
 % OPTIONAL INPUTS
-%   optIn <class>: description
+%   dur (scalar): maximum duration of noise segment in seconds. If no 
+%       quiescent period this long exists in the data, will return the 
+%       longest section. (default: 1)
 %
 % PARAMETER INPUTS
-%   'parameterName' <class>: description (default: )
+%   'normalized', <logical>: indicates whether the data has been normalized
+%       by the standard deviation of the noise. Used by findpulses.
+%       (Default: false)
 %
 % OUTPUTS
-%   out1 <class>: description
+%   xNoise (double): noisy segment extracted from the data
+%   tLim (numeric): time limits of noise segment in seconds
 %
 % EXAMPLE(S) 
 %
-%
 % IMPLEMENTATION
-% Other m-files required: none
-% Subfunctions: none
+% Other m-files required: SMOOTH1D, FINDPULSES
+% Subfunctions: SMOOTH1D, FINDPULSES
 % MAT-files required: none
 %
-% SEE ALSO:
+% SEE ALSO: FINDPULSES
 
 % Authors: Najja Marshall
 % Emails: njm2149@columbia.edu
-% Dated:
+% Dated: February 2019
 
-function [vn,xLim] = getnoise(v, Fs, varargin)
+function [xNoise, tLim] = getnoise(X, Fs, varargin)
 %% Parse inputs
 
 % initialize input parser
 P = inputParser;
-P.FunctionName = 'FUNCTIONTEMPLATE';
+P.FunctionName = 'GETNOISE';
 
 % validation functions
-% isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
+isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
 
 % add required, optional, and parameter-value pair arguments
-addRequired(P, 'v', @isnumeric)
-addRequired(P, 'Fs', @isscalar)
-% addOptional(P, 'optIn', default, validationFunction)
+addRequired(P, 'X', @(x) isnumeric(x) && isa(x,'double'))
+addRequired(P, 'Fs', @(x) isscalarnum(x,0,Inf))
+addOptional(P, 'dur', 1, @(x) isscalarnum(x,0,Inf))
 addParameter(P, 'normalized', false, @islogical)
 
 % clear workspace (parser object retains the data while staying small)
-parse(P, v, Fs, varargin{:});
+parse(P, X, Fs, varargin{:});
 clear ans varargin
 
 %%
 
-[~, nChannels] = size(v);
+[~, nChannels] = size(X);
 
 % locate spikes
-spkIdx = findpulses(v,Fs,'normalized',P.Results.normalized);
+spkIdx = findpulses(X,Fs,'normalized',P.Results.normalized);
 
 % smooth spike train
-s = cell2mat(cellfun(@(idx) sparse(idx,1,true,size(v,1),1),spkIdx,'uni',false));
+s = cell2mat(cellfun(@(idx) sparse(idx,1,true,size(X,1),1),spkIdx,'uni',false));
 sF = smooth1D(double(full(s)), Fs, 'box','wid',5e-3);
 
 % identify noiy patches
@@ -78,15 +86,15 @@ if ~any(noiseLen >= Fs)
     warning('Longest noise patch detected: %.3f ms. Estimate may be unreliable',max(noiseLen)/(1e3*Fs))
 end
 
-% center covariance window within longest noise patch
+% center window within longest noise patch
 [~,maxIdx] = max(noiseLen);
 cent = round(mean(noiseEdges(maxIdx,:)));
 
-% use longest noise data (up to 1 sec) for noise estimate
-covLen = min(noiseLen(maxIdx),Fs);
-covLen = covLen + mod(covLen,2);
-covFrame = cent+(-covLen/2:covLen/2-1);
+% return longest noise segment up to specified duration
+len = min(noiseLen(maxIdx), Fs*P.Results.dur);
+len = len + mod(len,2);
+frame = cent+(-len/2:len/2-1);
 
-xLim = covFrame([1 end])/Fs;
+tLim = frame([1 end])/Fs;
 
-vn = cell2mat(cellfun(@(ii) v(covFrame,ii),num2cell(1:nChannels),'uni',false));
+xNoise = cell2mat(cellfun(@(ii) X(frame,ii),num2cell(1:nChannels),'uni',false));

@@ -1,20 +1,22 @@
-%% FINDPATHS
-% Finds paths between connected nodes in a graph
+%% FINDPATHS find paths
+% Identifies all sets of connected nodes in an undirected graph.
 %
 % SYNTAX
-%   paths = findpaths(A)
+%   [grp,solo] = findpaths(A)
 %
 % REQUIRED INPUTS
-%   A (square array) - adjacency matrix 
+%   A (square array) - adjacency matrix for an undirected graph. Where
+%       a_{ij} is true or 1 indicates a connection between nodes i and j.
 %
 % OPTIONAL INPUTS: none
 %
 % VARIABLE INPUTS: none
 %
 % OUTPUTS
-%   paths (cell array) - list of connected nodes (separated by cells)
+%   grp (cell array) - list of connected nodes
+%   solo (cell array) - list of unconnected nodes
 %
-% EXAMPLE(S)
+% EXAMPLE
 %
 %   % generate a list of connected nodes
 %   nNodes = 10;
@@ -27,9 +29,8 @@
 %   A = false(nNodes);
 %   A(sub2ind(size(A), x(y==1,1), x(y==1,2))) = true;
 %
-%   % find paths
-%   paths = findpaths(A);
-%
+%   % find connected nodes
+%   grp = findpaths(A);
 %
 % IMPLEMENTATION
 % Other m-files required: none
@@ -42,7 +43,7 @@
 % Emails: njm2149@columbia.edu
 % Dated: August 2017
 
-function paths = findpaths(A, varargin)
+function [grp,solo] = findpaths(A, varargin)
 %% Parse inputs
 
 % initialize input parser
@@ -59,7 +60,7 @@ clear ans varargin
 
 %% Main loop
 
-paths = {[]};
+grp = {[]};
 rowNo = 1;
 
 while nnz(A) > 0
@@ -70,28 +71,28 @@ while nnz(A) > 0
     if ~isempty(edges)
         
         % add unique nodes to path list
-        paths{end} = [rowNo, edges(~ismember(edges,paths{end}))];
+        grp{end} = [rowNo, edges(~ismember(edges,grp{end}))];
         
         % remove connections from adjacency matrix
         A(rowNo,edges) = 0;
         
         % check connections to and from each node in the path
         nodeIdx = 2;
-        while nodeIdx <= length(paths{end})
+        while nodeIdx <= length(grp{end})
             
             % current node
-            node = paths{end}(nodeIdx);
+            node = grp{end}(nodeIdx);
             
             % add connections from current node
             edges = find(A(node,:));
-            paths{end} = [paths{end}, setdiff(edges,paths{end})];
+            grp{end} = [grp{end}, setdiff(edges,grp{end})];
             
             % remove from adjacency matrix
             A(node,edges) = 0;
             
             % add connections to current node
             edges = find(A(:,node));
-            paths{end} = [paths{end}, setdiff(edges',paths{end})];
+            grp{end} = [grp{end}, setdiff(edges',grp{end})];
             
             % remove from adjacency matrix
             A(edges,node) = 0;
@@ -101,7 +102,7 @@ while nnz(A) > 0
         
         % add cell to path list if any edges remain
         if nnz(A) > 0
-            paths = [paths; {[]}];
+            grp = [grp; {[]}];
         end
     end
     
@@ -110,4 +111,7 @@ while nnz(A) > 0
 end
 
 % sort list of nodes
-paths = cellfun(@sort,paths,'uni',false);
+grp = cellfun(@sort,grp,'uni',false);
+
+% unsorted
+solo = num2cell(setdiff(1:size(A,1),cell2mat(grp')))';

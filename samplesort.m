@@ -106,10 +106,10 @@ unqSpkIdx = spkIdx(unitNo);
 %% Get wave template
 
 WAVE_DUR = 20e-3; % seconds
-waveLen = round(WAVE_DUR*EMG.Fs);
+waveLen = round(WAVE_DUR*Eph.Fs);
 
-waveforms = sta(EMG.data,unqSpkIdx,waveLen);
-[w,srtIdx] = wavetemplate(waveforms,'plot',true,'sort',true);
+waveforms = spktrig(Eph.data,unqSpkIdx,waveLen);
+w = wavetemplate(waveforms);
 
 %% Manually prune noise templates
 
@@ -131,7 +131,7 @@ plotwavetemplate(w(:,:,remUnit))
 % manual method
 T_INIT = 0;
 NOISE_DUR = 1; % ideal
-vn = EMG.range(T_INIT+[0 NOISE_DUR-1/3e4]).data;
+vn = Eph.range(T_INIT+[0 NOISE_DUR-1/3e4]).data;
 
 % automatic method
 % vn = getnoise(Eph.data,Eph.Fs);

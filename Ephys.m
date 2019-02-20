@@ -16,6 +16,8 @@
 %   nChannels: channel count
 %   nTrials: trial count
 %   trialNo: trial number
+%   isFilt: indicates whether the "filt" method has been applied
+%   isNorm: indicates whether the "normalize" method has been applied
 %
 % METHODS (static)
 %   Eph = Ephys.init_from_nsx(filePath) initalizes an Ephys object by 
@@ -107,6 +109,8 @@ classdef Ephys
         nChannels
         nTrials
         trialNo
+        isFilt = false
+        isNorm = false
     end
     methods (Static)
         function obj = init_from_nsx(filePath)
@@ -288,20 +292,18 @@ classdef Ephys
                     otherwise
                         error('Unrecognized filter type')
                 end
+                obj(ii).isFilt = true;
             end
         end
-        function [obj,sigma] = normalize(obj)
+        function [obj,sigma] = normalize(obj,sigma)
             % normalize data
             % [obj,sigma] = obj.norm normalizes data by the estimated
             %   standard deviation of the noise, sigma
-            sigma = cell(length(obj),1);
-            for ii = 1:length(obj)
-                sigma{ii} = median(abs(double(obj(ii).data)),1)/0.6745;
-                obj(ii).data = double(obj(ii).data)./sigma{ii};
+            if nargin == 1
+                sigma = median(abs(double(obj.data)),1)/0.6745;
             end
-            if length(obj) == 1
-                sigma = sigma{1};
-            end
+            obj.data = double(obj.data)./sigma;
+            obj.isNorm = true;
         end
 %         function [res,vEst] = residual(obj,Neu)
 %             % compute residual
@@ -373,6 +375,7 @@ classdef Ephys
                     plot(get(gca,'xlim'),-P.Results.sigma*[1 1],'r');
                 end
                 title(sprintf('channel %i',obj.chanNo(ii)))
+                box off
             end
             xlabel('time (s)')
             if obj.nChannels > 1
@@ -406,7 +409,7 @@ classdef Ephys
             % overlay neuronal waveforms
             Neu = P.Results.Neu;
             if ~isempty(Neu)
-                M = plotmarkers();
+                cmap = brewermap(Neu.nUnits,'Spectral');
                 win = (0:size(Neu.waveform,1)-1) - size(Neu.waveform,1)/2;
                 idxLim = [1+length(win), length(obj.time)-length(win)];
                 wEner = squeeze(sum(Neu.waveform.^2,1));
@@ -424,7 +427,7 @@ classdef Ephys
                         si = find(Neu.spikes(:,un)); % + obj.alignIndex;
                         si = si(si>idxLim(1) & si<idxLim(2));
                         for kk = 1:length(si)
-                            fh(un) = plot(obj.time(win+si(kk)),Neu.waveform(:,ii,un),M.line{un+1});
+                            fh(un) = plot(obj.time(win+si(kk)),Neu.waveform(:,ii,un),'color',cmap(un,:));
                         end
                     end
                     if ii == 1

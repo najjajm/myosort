@@ -1,29 +1,37 @@
-%% SMOOTH1D - 1 dimensional smoothing
-% Smooths an input signal using the specified method
+%% SMOOTH1D 1-dimensional smoothing
+% Filters a signal via the fast fourier transform. Automatically detects
+% and filters along the non-singleton dimension if only one exists;
+% otherwise, smooths along any specified input dimension.
 %
 % SYNTAX
-%   xS = smooth1D(x, Fs, method, [norm], varargin)
+%   Y = smooth1D(X, Fs, method, [norm], varargin)
 %
 % REQUIRED INPUTS
-%   x (vector double) - input signal
-%   Fs (scalar double) - sample rate in Hz
-%   method (char) - smoothing method. Options: 'gau', 'exp', 'box'
+%   X (numeric): time series array of any size
+%   Fs (scalar): sample frequency in Hz
+%   method (string): smoothing method. Options: 
+%       'gau' (Gaussian filter)
+%       'box' (boxcar filter)
 %
 % OPTIONAL INPUTS
-%   norm (logical) - indicator to normalize smoothed output by height of
-%       the filter's impulse response (default: false)
+%   norm (logical): if true, normalizes output by amplitude of the filter's
+%       impulse response. (default: false)
 %
-% VARIABLE INPUTS
-%   (...,'dim',<integer>) - dimension to apply filter (default: 1)
-%   (...,'sd',<scalar>) - standard deviation of Gaussian in sec (default: 25e-3)
-%   (...,'widGau',<scalar>) - width of Gaussian in multiples of standard
-%       deviations (default: 4)
-%   (...,'widBox',<scalar>) - width of boxcar in sec (default: 100e-3)
+% PARAMETER INPUTS
+%   'dim', <integer>: dimension to apply filter. (default: 1, if X has more
+%       than one non-singleton dimension)
+%
+%   'sd', <scalar>: standard deviation of Gaussian in seconds 
+%       (default: 0.025)
+%
+%   'wid' <scalar>: filter widths. Width of Gaussian filter in multiples of
+%       standard deviation (default: 4) or width of boxcar filter in
+%       seconds (default: 0.1)
 %
 % OUTPUTS
-%   xS (vector double) - smoothed input
+%   Y (numeric): smoothed input
 %
-% EXAMPLE(S) 
+% EXAMPLE(S)
 %
 %
 % IMPLEMENTATION
@@ -37,26 +45,28 @@
 % Emails: njm2149@columbia.edu
 % Dated: July 2017
 
-function y = smooth1D(x, Fs, method, varargin)
+function Y = smooth1D(X, Fs, method, varargin)
 %% Parse inputs
 
 % initialize input parser
 P = inputParser;
 P.FunctionName = 'SMOOTH1D';
 
+% validation functions
+isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
+
 % add required, optional, and parameter-value pair arguments
-addRequired(P, 'x', @isnumeric)
-addRequired(P, 'Fs', @isscalar)
+addRequired(P, 'X', @isnumeric)
+addRequired(P, 'Fs', @(x) isscalarnum(x,0,Inf))
 addRequired(P, 'method', @(s) ischar(s) && ismember(s,{'box','gau'}))
 addOptional(P, 'norm', false, @islogical)
-addParameter(P, 'dim', 1, @(d) isscalar(d) && d==round(d))
-addParameter(P, 'sd', 0.025, @isscalar) % standard dev. of Gaussian (sec)
-addParameter(P, 'wid', [], @isscalar)
+addParameter(P, 'dim', 1, @(x) isscalarnum(x,0,ndims(X)+1) && x==round(x))
+addParameter(P, 'sd', 0.025, @(x) isscalarnum(x,0,Inf))
+addParameter(P, 'wid', [], @(x) isscalarnum(x,0,Inf))
 
 % clear workspace (parser object retains the data while staying small)
-parse(P, x, Fs, method, varargin{:});
+parse(P, X, Fs, method, varargin{:});
 clear ans varargin
-
 
 %% Make impulse response
 
@@ -100,29 +110,35 @@ end
 
 %% Filter using FFT
 
-filtDim = P.Results.dim;
+% set filter dimension
+szX = size(X);
+if nnz(szX > 1) == 1
+    filtDim = find(szX > 1);
+else
+    filtDim = P.Results.dim;
+end
 
 % pad x to the length of the impulse response
-padLen = min(floor(length(fx)/2), size(x,filtDim));
-xPad = permute(double(x),[filtDim,setdiff(1:ndims(x),filtDim)]);
-xPad = cat(1,mean(xPad(1:padLen,:,:),1).*ones(padLen,size(xPad,2),size(xPad,3)), xPad,...
-            mean(xPad(end-padLen+1:end,:,:),1).*ones(padLen,size(xPad,2),size(xPad,3)));
+padLen = min(floor(length(fx)/2), szX(filtDim));
+Xpad = permute(double(X),[filtDim,setdiff(1:ndims(X),filtDim)]);
+Xpad = cat(1,mean(Xpad(1:padLen,:,:),1).*ones(padLen,size(Xpad,2),size(Xpad,3)), Xpad,...
+            mean(Xpad(end-padLen+1:end,:,:),1).*ones(padLen,size(Xpad,2),size(Xpad,3)));
 
 % FFT
-nPad = 2^nextpow2(size(xPad,1));
-y = ifft(fft(xPad,nPad).*fft(fx(:),nPad));
+nPad = 2^nextpow2(size(Xpad,1));
+Y = ifft(fft(Xpad,nPad).*fft(fx(:),nPad));
 
 % remove padding
-y = y(2*padLen + (1:size(x,filtDim)),:,:);
+Y = Y(2*padLen + (1:szX(filtDim)),:,:);
 
 % reshape to input dimensions
-shiftOrd = zeros(1,ndims(x));
-for ii = 1:ndims(x)
-    shiftOrd(ii) = find(size(y)==size(x,ii));
+shiftOrd = zeros(1,ndims(X));
+for ii = 1:ndims(X)
+    shiftOrd(ii) = find(size(Y)==szX(ii));
 end
-y = permute(y,shiftOrd);
+Y = permute(Y,shiftOrd);
 
 % normalize by magnitude of impulse response
 if P.Results.norm
-    y = y/max(fx);
+    Y = Y/max(fx);
 end
