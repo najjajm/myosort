@@ -75,10 +75,8 @@ for ii = 1:length(Spk)
 end
 
 % spike indices
-s = Spk.sparsify;
-s = cat(2,s{:});
-s = mat2cell(s,size(s,1),ones(1,size(s,2)));
-spkIdx = cellfun(@find,s,'uni',false);
+spkIdx = Spk.indices;
+spkIdx = cat(1,spkIdx{:});
 
 chanPerUnit = Spk.unit_channel;
 
