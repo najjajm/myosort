@@ -333,7 +333,6 @@ classdef Ephys
             addParameter(P, 'sym', true, @islogical)
             addParameter(P, 'sigma', [], @(x) isempty(x) || isnumeric(x))
             addParameter(P, 'minWid', 1e-3, @(x) isscalarnum(x,0,1))
-            addParameter(P, 'filt', true, @islogical)
             addParameter(P, 'normalized', false, @islogical)
             parse(P,varargin{:})
             params = [P.Parameters(:),struct2cell(P.Results)];
