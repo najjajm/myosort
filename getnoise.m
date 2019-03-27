@@ -52,6 +52,7 @@ isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
 addRequired(P, 'X', @(x) isnumeric(x) && isa(x,'double'))
 addRequired(P, 'Fs', @(x) isscalarnum(x,0,Inf))
 addOptional(P, 'dur', 1, @(x) isscalarnum(x,0,Inf))
+addParameter(P, 'thresh', 4, @(x) isscalarnum(x,0,Inf))
 addParameter(P, 'normalized', false, @islogical)
 
 % clear workspace (parser object retains the data while staying small)
@@ -63,7 +64,7 @@ clear ans varargin
 [~, nChannels] = size(X);
 
 % locate spikes
-spkIdx = findpulses(X,Fs,'normalized',P.Results.normalized);
+spkIdx = findpulses(X,Fs,'normalized',P.Results.normalized,'thresh',P.Results.thresh);
 
 % smooth spike train
 s = cell2mat(cellfun(@(idx) sparse(idx,1,true,size(X,1),1),spkIdx,'uni',false));

@@ -1,5 +1,6 @@
 %% BOTM Bayes optimal template matching
-% Function details
+% Implementation of the Bayes optimal template matching algorithm for spike
+% sorting [Franke et al., 2015]
 %
 % SYNTAX
 %   outputs = functiontemplate(inputs, varargin)
@@ -48,8 +49,11 @@ addRequired(P, 'Cinv', @isnumeric)
 addParameter(P, 'prior', 0.01, @(x) isscalarnum(x,0,1))
 addParameter(P, 'sic', true, @islogical)
 addParameter(P, 'plot', {''}, @(x) iscell(x) && all(ismember(x,{'','fit','res','resen','rec','dis'})))
-addParameter(P, 'cmap', 'Spectral', @ischar)
+addParameter(P, 'cmap', 'Spectral', @(x) ischar(x) || (isnumeric(x) && size(x,2)==3))
+addParameter(P, 'bright', -0.2, @(x) isscalarnum(x,-1,1))
 addParameter(P, 'verbose', false, @islogical)
+addParameter(P, 'priority', 'stability', @(x) ischar(x) && ismember(x,{'stability','speed'}))
+addParameter(P, 'figNo', [], @(x) isempty(x) || isnumeric(x))
 
 % clear workspace (parser object retains the data while staying small)
 parse(P, X, Fs, template, Cinv, varargin{:});
@@ -142,13 +146,13 @@ if P.Results.verbose
     t0 = tic;
 end
 
+% extract the discriminant at each spike
+dSpk = (thr-eps) * ones(nDataPoints,nUnit);
+for un = 1:nUnit
+    dSpk(spkIdx{un},un) = d(spkIdx{un},un);
+end
+
 if P.Results.sic && nnz(~cellfun(@isempty,spkIdx)) > 1
-    
-    % extract the discriminant at each spike
-    dSpk = (thr-eps) * ones(nDataPoints,nUnit);
-    for un = 1:nUnit
-        dSpk(spkIdx{un},un) = d(spkIdx{un},un);
-    end
     
     % convert spike indices to pulse trains
     [s,sFilt] = deal(zeros(nUnit,nDataPoints));
@@ -259,16 +263,34 @@ end
 
 %% Plotting
 
-cmap = brewermap(nUnit,P.Results.cmap);
-% cmap = flipud(jet);
-% cmap = cmap(round(linspace(1,size(cmap,1),nUnit)),:);
-cmap = max([0 0 0],cmap-.2);
+% color map
+cmap = P.Results.cmap;
+if ischar(cmap)
+    cmap = brewermap(nUnit,cmap);
+    cmap = min([1 1 1],max([0 0 0], cmap + P.Results.bright));
+end
+
+% axes
+figNo = P.Results.figNo;
+nPlots = length(P.Results.plot);
+if isempty(figNo) || length(figNo)~=nPlots
+    holdFig = false;
+else
+    holdFig = true;
+end
+figIdx = 1;
 
 t = (1:nDataPoints)/Fs;
 
 % discriminant
 if ismember('dis',P.Results.plot)
-    figure
+    if holdFig
+        figure(figNo(figIdx))
+        clf
+        figIdx = figIdx+1;
+    else
+        figure
+    end
     ax = [0 0];
     ax(1) = subplot(211);
     hold on
@@ -277,6 +299,7 @@ if ismember('dis',P.Results.plot)
     end
     set(gca,'xlim',[1 size(d,1)])
     plot(get(gca,'xlim'),thr*[1 1],'color',0.8*[1 1 1])
+    box off
     title(sprintf('Fisher''s Discriminant\nraw'))
     legend(cellfun(@(n) sprintf('unit %i',n),num2cell(1:nUnit),'uni',false))
     ax(2) = subplot(212);
@@ -287,18 +310,26 @@ if ismember('dis',P.Results.plot)
     title('post-SIC')
     set(gca,'xlim',[1 size(d,1)])
     plot(get(gca,'xlim'),thr*[1 1],'color',0.8*[1 1 1])
+    box off
+    title(sprintf('Fisher''s Discriminant\nthresholded'))
     linkaxes(ax,'x')
 end
 
 % single unit fits
 if ismember('fit',P.Results.plot)    
-    figure
+    if holdFig
+        figure(figNo(figIdx))
+        clf
+        figIdx = figIdx+1;
+    else
+        figure
+    end
     ax = zeros(1,nChan);
     s = zeros(nDataPoints,1);
     for ch = 1:nChan
         
         ax(ch) = subplot(nChan,1,ch);
-        fh = plot(t,X(:,ch),'k');
+        fh = plot(t,X(:,ch),'color',[0 0 0 0.25],'linewidth',1.5);
         fh.Color(4) = 0.25;
         hold on
         
@@ -311,10 +342,11 @@ if ismember('fit',P.Results.plot)
 %             end
             s = s*0;
             s(spkIdx{un}) = 1;
-            fh(un) = plot(t,conv(s,template(:,ch,un),'same'),'color',cmap(un,:));
+            fh(un) = plot(t,conv(s,template(:,ch,un),'same'),'color',cmap(un,:),'linewidth',1.25);
         end
         
         ylabel(sprintf('channel %i',ch))
+        box off
         if ch == 1
             title('single unit fits')
         end
@@ -330,13 +362,19 @@ end
 
 % reconstruction
 if ismember('rec',P.Results.plot)
-    figure
+    if holdFig
+        figure(figNo(figIdx))
+        clf
+        figIdx = figIdx+1;
+    else
+        figure
+    end
     ax = zeros(1,nChan);
     s = zeros(nDataPoints,1);
     for ch = 1:nChan
         
         ax(ch) = subplot(nChan,1,ch);
-        plot(X(:,ch),'k','linewidth',1);
+        plot(t,X(:,ch),'k','linewidth',1);
         hold on
         
         rec = zeros(nDataPoints,1);
@@ -347,16 +385,17 @@ if ismember('rec',P.Results.plot)
                 rec = rec + conv(s,template(:,ch,un),'same');
             end
         end
-        plot(rec,'c')
+        plot(t,rec,'c')
         
         if ch == 1
             title('original (black) and reconstructed (cyan) signal')
         end
         ylabel(sprintf('channel %i',ch))
+        box off
     end
     linkaxes(ax,'x')
 %     sgtitle('original (black) and reconstructed (cyan) signal')
-    set(gca,'xlim',[1 nDataPoints])
+    set(gca,'xlim',t([1 end]))
 end
 
 % residual
@@ -372,7 +411,14 @@ if ismember('res',P.Results.plot)
        end
    end
     
-   figure
+   if holdFig
+       figure(figNo(figIdx))
+       clf
+       figIdx = figIdx+1;
+   else
+       figure
+   end
+   
    ax = zeros(1,nChan);
    for ch = 1:nChan
        ax(ch) = subplot(nChan,1,ch);
@@ -384,6 +430,7 @@ if ismember('res',P.Results.plot)
            title('raw (black) and residual (red)')
        end
        ylabel(sprintf('channel %i',ch))
+       box off
    end
    linkaxes(ax,'x')
    set(gca,'xlim',t([1 end]))
@@ -409,15 +456,22 @@ if ismember('resen',P.Results.plot)
     end
     totResEner = totResEner';
     
-    figure
-    bar([resEner{1}, totResEner(:,1)]')
-    ylabel('normalized residual energy')
-    set(gca,'xtick',1:nUnit+1)
-    set(gca,'xticklabel',[cellfun(@(n) sprintf('unit %i',n),num2cell(1:nUnit),'uni',false),{'total'}])
-    set(gca,'ylim',[0 max(1,max(max([resEner{1},totResEner(:,1)])))])
-    legend(cellfun(@(n) sprintf('chan %i',n),num2cell(1:nChan),'uni',false),'location','northeast')
+    if ~holdFig
+        figure
+        bar([resEner{1}, totResEner(:,1)]')
+        ylabel('normalized residual energy')
+        set(gca,'xtick',1:nUnit+1)
+        set(gca,'xticklabel',[cellfun(@(n) sprintf('unit %i',n),num2cell(1:nUnit),'uni',false),{'total'}])
+        set(gca,'ylim',[0 max(1,max(max([resEner{1},totResEner(:,1)])))])
+        legend(cellfun(@(n) sprintf('chan %i',n),num2cell(1:nChan),'uni',false),'location','northeast')
+    end
     
-    figure
+    if holdFig
+        figure(figNo(figIdx))
+        clf
+    else
+        figure
+    end
     bar([resEner{2}, totResEner(:,2)]')
     ylabel('normalized residual energy (spike regions)')
     set(gca,'xtick',1:nUnit+1)

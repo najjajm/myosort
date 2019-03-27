@@ -12,6 +12,7 @@
 % PARAMETER INPUTS
 %   'sort', <logical>: if true, sorts set of templates by their average
 %       energy across channels (default: false)
+%
 %   'plot', <logical>: if true, plots templates (default: false)
 %
 % OUTPUTS

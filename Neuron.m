@@ -92,7 +92,11 @@ classdef Neuron
                 obj = obj.update_rate;
                 obj = obj.update_psth;
             else
-                error('Invalid spike array assignment')
+                if ~isempty(spikes)
+                    error('Invalid spike array assignment')
+                else
+                    obj.spikes = sparse([]);
+                end
             end
         end
         function obj = set.alignIndex(obj, alignIndex)
@@ -224,6 +228,8 @@ classdef Neuron
             nCond = length(P.Results.cond);
             nCol = ceil(sqrt(nCond));
             nRow = ceil(nCond/nCol);
+            
+            absRMax = max(arrayfun(@(x) max(max(x.psth(:,:,1))),obj));
             for ii = 1:nCond
                 if nCond > 1
                     subplot(nRow,nCol,ii)
@@ -247,7 +253,7 @@ classdef Neuron
                         'EdgeAlpha',0, 'FaceAlpha',0.125)
                 end
                 set(gca,'xlim',t([1 end]))
-                set(gca,'ylim',[0 max(1,1.1*max(max(sum(y,3))))])
+                set(gca,'ylim',[0 max(1,round(1.1*absRMax))]) % max(1,1.1*max(max(sum(y,3))))])
                 xlabel('time (s)')
                 ylabel('firing rate (Hz)')
                 title(sprintf('condition %i',cNo))

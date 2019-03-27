@@ -274,7 +274,9 @@ classdef Spike
                 cutoff = cutoff*ones(1,length(obj));
             end
             for ii = 1:length(obj)
-                obj(ii).label = rmvoutliers(double(obj(ii).waveform),obj(ii).label,'cut',cutoff(ii));
+                if ~isempty(obj(ii).label)
+                    obj(ii).label = rmvoutliers(double(obj(ii).waveform),obj(ii).label,'cut',cutoff(ii));
+                end
             end
         end
         % merge
@@ -309,6 +311,9 @@ classdef Spike
                 thresh = thresh*ones(1,length(obj));
             end
             for ii = 1:length(obj)
+                if isempty(obj(ii).label)
+                    continue
+                end
                 % unsorted index
                 unsrtIdx = find(obj(ii).label==0);
                 nUnsrt = length(unsrtIdx);
@@ -444,20 +449,34 @@ classdef Spike
                 pm = reshape(repmat(markers, size(colors,1), 1),...
                     size(colors,1)*length(markers), 1);
                 pm = [pm, repmat({'color'},size(pm,1),1), repmat(mat2cell(colors,ones(size(colors,1),1),3),length(markers),1)];
-                pm = [{'.','color',0.8*ones(1,3)};pm];
                 % plot
                 hold on
                 clusNo = setdiff(unique(abs(obj.label)), min(obj.label):-1);
                 nClus = length(clusNo);
-                for ii = 1:nClus                    
-                    lid = obj.label==clusNo(ii);
+                legText = [];
+                % unlabeled
+                if any(obj.label==0)
+                    lid = obj.label==0;
                     if nFeat == 2
-                        plot(featVal{1}(lid),featVal{2}(lid),pm{ii,:})
+                        plot(featVal{1}(lid),featVal{2}(lid),'k.','color',0.8*ones(1,3))
                     else
-                        plot3(featVal{1}(lid),featVal{2}(lid),featVal{3}(lid),pm{ii,:})
+                        plot3(featVal{1}(lid),featVal{2}(lid),featVal{3}(lid),'k.','color',0.8*ones(1,3))
                     end
+                    legText = {'unsorted'};
                 end
-                legend([{'unsorted'},cellfun(@(n) sprintf('MU %i',n), num2cell(obj.Clus.id), 'uni', false)])
+                % labeled
+                if any(clusNo > 0)
+                    for ii = 1:nClus
+                        lid = obj.label==clusNo(ii);
+                        if nFeat == 2
+                            plot(featVal{1}(lid),featVal{2}(lid),pm{ii,:})
+                        else
+                            plot3(featVal{1}(lid),featVal{2}(lid),featVal{3}(lid),pm{ii,:})
+                        end
+                    end
+                    legText = [legText, cellfun(@(n) sprintf('MU %i',n), num2cell(obj.Clus.id), 'uni', false)];
+                end
+                legend(legText)
             else
                 if nFeat == 2
                     plot(featVal{1},featVal{2},'k.')

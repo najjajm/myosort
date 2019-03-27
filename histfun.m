@@ -65,16 +65,41 @@ P.FunctionName = 'HISTFUN';
 isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
 
 % add required, optional, and parameter-value pair arguments
-addRequired(P, 'Y', @isnumeric)
+addRequired(P, 'Y', @(x) isnumeric(x) || iscell(x))
 addParameter(P, 'lim', [], @(x) isempty(x) || (isnumeric(x) && length(x)==2 && x(1)<x(2)))
 addParameter(P, 'plot', false, @logical)
-addParameter(P, 'nYTick', 10, @(x) isscalarnum(x,0,Inf) && x==round(x))
+addParameter(P, 'nYTick', 5, @(x) isscalarnum(x,0,Inf) && x==round(x))
+addParameter(P, 'nBins', [], @(x) isempty(x) || isnumeric(x))
+addParameter(P, 'axes', [], @(x) isempty(x) || isa(x,'matlab.ui.control.UIAxes') || isa(x,'matlab.graphics.axis.Axes'))
+addParameter(P, 'yTick', [], @(x) isempty(x) || isnumeric(x))
+addParameter(P, 'yTickLabel', [], @(x) isempty(x) || iscell(x))
+addParameter(P, 'count', [], @(x) isempty(x) || isnumeric(x))
 
 % clear workspace (parser object retains the data while staying small)
 parse(P, Y, varargin{:});
 clear ans varargin
 
 %% Histogram
+
+if iscell(Y)
+    
+    Y = Y(:);
+    nGrp = length(Y);
+    
+    % normalize
+    absMax = cellfun(@(x) max(max(abs(x),[],2),[],1), Y);
+    Y = cellfun(@(x,m) x/m, Y, num2cell(absMax), 'uni',false);
+    
+    % apply vertical offset to each group
+    baseline = flipud([0;cumsum(2*ones(nGrp-1,1))]);
+    Y = cellfun(@(x,b) x+b, Y, num2cell(baseline), 'uni',false);
+    
+    Y = cell2mat(Y);
+    
+    inputCell = true;
+else
+    inputCell = false;
+end
 
 % input dimensions
 T = size(Y,2);
@@ -86,8 +111,13 @@ if isempty(lim)
 end      
 
 % bin samples
-bins = lim(1):lim(2);
-nBins = length(bins);
+if isempty(P.Results.nBins)
+    bins = lim(1):lim(2);
+    nBins = length(bins);
+else
+    bins = linspace(lim(1),lim(2),P.Results.nBins);
+    nBins = P.Results.nBins;
+end
 
 counts = cell(1,T);
 for t = 1:T
@@ -110,26 +140,67 @@ epsilon = 10^ceil(log10(abs(min(filtCounts(:)))));
 logCounts = log(filtCounts/100 + epsilon);
 
 % plot heat map
-imagesc(logCounts);
+if isempty(P.Results.axes)
+    ax = gca;
+else
+    ax = P.Results.axes;
+end
+cla(ax,'reset')
+imagesc(ax,logCounts);
+set(ax,'yLim',[1 nBins])
+set(ax,'xLim',[1 T])
 
 % color bar
-colormap('bone')
-colorbar
+colormap(ax,'bone')
+colorbar('peer',ax)
 
 % truncate color axis to emphasize noise
-cax = caxis;
-caxis([cax(1)/4, cax(2)])
+cax = caxis(ax);
+caxis(ax,[cax(1)/4, cax(2)])
+
+% display count
+if ~isempty(P.Results.count)
+    text(ax,0.05*T,0.975*nBins,sprintf('%i',P.Results.count),'color','w','fontsize',15)
+end
 
 % set y-axis values to increasing
-set(gca,'ydir','normal')
+set(ax,'ydir','normal')
 
 % y-tick
-firstNonNeg = find(bins>=0, 1);
-yt = round(linspace(1,nBins,P.Results.nYTick));
-yt = yt-(yt(find(yt>=firstNonNeg,1))-firstNonNeg);
-yt = yt(yt>0 & yt<=nBins);
-set(gca,'yTick',yt);
+if ~inputCell
+    if isempty(P.Results.yTick)
+        firstNonNeg = find(bins>=0, 1);
+        yt = round(linspace(1,nBins,P.Results.nYTick));
+        yt = yt-(yt(find(yt>=firstNonNeg,1))-firstNonNeg);
+        yt = yt(yt>0 & yt<=nBins);
+    else
+        [~,yt] = min(abs(bins(:)-P.Results.yTick(:)'),[],1);
+    end
+else
+    yTickVal = 1/2;
+    yTickPos = [baseline-yTickVal, baseline, baseline+fliplr(yTickVal)];
+    yTick = round((yTickPos - baseline).*absMax(:));
+    
+    yTickPos = reshape(fliplr(yTickPos)',(1+2*length(yTickVal))*nGrp,1);
+    yTick = reshape(fliplr(yTick)',(1+2*length(yTickVal))*nGrp,1);
+    
+    yTickPos = flipud(yTickPos);
+    
+    [~,yt] = min(abs(bins(:)-yTickPos(:)'),[],1);
+end
+set(ax,'yTick',yt);
 
 % y-tick labels
-ytl = cellfun(@num2str,num2cell(round(bins(yt))),'uni',false);
-set(gca,'yTickLabel',ytl);
+if ~inputCell
+    if isempty(P.Results.yTickLabel)
+        ytl = cellfun(@num2str,num2cell(round(bins(yt))),'uni',false);
+    else
+        ytl = P.Results.yTickLabel;
+    end
+else
+    ytl = cellfun(@num2str,flipud(num2cell(yTick)),'uni',false);
+end
+set(ax,'yTickLabel',ytl);
+
+% formatting
+box(ax,'off')
