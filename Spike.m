@@ -44,9 +44,16 @@
 %       number of columns as the length of Spk, then the waveforms for each
 %       object are obtained from each consecutive column in v.
 %
-%   Spk.align(v,waveDur,refDur) wrapper function for ALIGNWAVEFORMS. Aligns
-%       each spike within a waveDur window (seconds). Spike indices that
-%       coincide within refDur seconds are removed.
+%   Spk.align(v,[method],[waveDur],[refDur]) aligns spike waveforms using
+%       user-specified method. If unspecified, method defaults to 'asym',
+%       which uses an asymetric wavelet as the target template for 
+%       alignment. If method is 'sym', uses a symmetric wavelet as the
+%       target template. If method is 'self', aligns all waveforms within 
+%       each cluster to the first waveform. If method is 'peak', uses a
+%       peak-based alignment function (ALIGNWAVEFORMS). If using 'peak',
+%       must also specify a waveform alignment duration (waveDur) and a 
+%       refractory duration (refDur), both in units of seconds. Spike
+%       indices that coincide within refDur seconds are removed.
 %
 %   Spk.cluster(nPC,maxClus) clusters waveforms using a Dirichlet-Process
 %       Gaussian Mixture Model with nPC features and a truncation of
