@@ -210,13 +210,128 @@ classdef Spike
             waveLen = round(waveDur*obj(1).Fs);
             waveLen = waveLen + mod(waveLen,2);
             for ii = 1:length(obj)
-                obj(ii).waveform = cell2mat(spktrig(v(:,ii),num2cell(obj(ii).index),waveLen));
+                [w,s] = spktrig(v(:,ii),num2cell(obj(ii).index),waveLen);
+                obj(ii).waveform = cell2mat(w);
+                obj(ii).index = cell2mat(s);
             end
         end
-        function obj = align(obj,v,waveDur,refDur)
-            % align waveforms
-            for ii = 1:length(obj)
-                [obj(ii).waveform,obj(ii).index] = alignwaveforms(v(:,ii),obj(ii).Fs,obj(ii).index,'waveDur',waveDur,'refDur',refDur);
+        function obj = align(obj,v,method,waveDur,refDur)
+            
+            if nargin == 2
+                method = 'asym';
+                waveDur = [];
+                refDur = [];
+            end
+            
+            switch method
+                
+                case 'self' % align within cluster
+                    
+                    for ii = 1:length(obj)
+                        
+                        len = 2*obj(ii).waveLength-1;
+                        nPad = 2^nextpow2(len);
+                        
+                        nClus = length(obj(ii).Clus.id);
+                        for jj = 1:nClus
+                            
+                            cid = obj(ii).label == obj(ii).Clus.id(jj);
+                            
+                            w = obj(ii).waveform(cid,:)';
+                            
+                            xc = ifft(fft(flipud(w(:,1)),nPad) .* fft(w,nPad,1),[],1);
+                            [~,pkIdx] = max(xc);
+                            obj(ii).index(cid) = obj(ii).index(cid) - (pkIdx(:)-obj(ii).waveLength);
+                            
+                            [w,s] = spktrig(v(:,ii),num2cell(obj(ii).index(cid)),obj(ii).waveLength);
+                            obj(ii).waveform(cid,:) = cell2mat(w);
+                            obj(ii).index(cid) = cell2mat(s);
+                        end
+                    end
+                    
+                case 'peak' % peak-based
+                    
+                    for ii = 1:length(obj)
+                        [obj(ii).waveform,obj(ii).index] = alignwaveforms(v(:,ii),obj(ii).Fs,obj(ii).index,'waveDur',waveDur,'refDur',refDur);
+                    end
+                    
+                otherwise
+                    
+                    waveLen = max(arrayfun(@(x) x.waveLength,obj));
+                    len = 2*waveLen-1;
+                    nPad = 2^nextpow2(len);
+                    
+                    if strcmp(method,'sym') % symmetric wavelet
+                        
+                        filtBank = cwtfilterbank('SignalLength',waveLen,...
+                            'SamplingFrequency',obj(1).Fs,...
+                            'waveletParameters',[1 3],...
+                            'FrequencyLimits',fliplr(round(1e3./[.1 10])));
+                        wvMorse = wavelets(filtBank);
+                        wvTmp = real(wvMorse(30,:));
+                        
+                    else % asymmetric wavelet
+                        
+                        waveParams = [1 3; 3 9];
+                        for ii = 1:2
+                            filtBank = cwtfilterbank('SignalLength',waveLen,...
+                                'SamplingFrequency',obj(1).Fs,...
+                                'waveletParameters',waveParams(ii,:),...
+                                'FrequencyLimits',fliplr(round(1e3./[.1 10])));
+                            wvMorse = wavelets(filtBank);
+                            y = real(wvMorse(round(size(wvMorse,1)/2),:));
+                            
+                            if ii == 1
+                                wvTmp = y;
+                            else
+                                stitchPt = 1+waveLen/2;
+                                wvTmp(stitchPt:end) = (wvTmp(stitchPt)/y(stitchPt)) * y(stitchPt:end);
+                            end
+                        end
+                    end
+                    wvTmp = fft(wvTmp',nPad,1);
+                    
+                    spkLim = [1+waveLen/2, obj(1).nSamples-waveLen/2+1];
+                    for ii = 1:length(obj)
+                        if isempty(obj(ii).index)
+                            continue
+                        end
+                        
+                        pAligned = 0;
+                        dp = Inf;
+                        while pAligned < 0.99 && dp > 1e-3
+                            xc = ifft(wvTmp .* fft(flipud(obj(ii).waveform'),nPad,1),[],1);
+                            [~,pkIdx] = max(xc);
+                            oldIdx = obj(ii).index;
+                            obj(ii).index = obj(ii).index - (pkIdx(:)-obj(ii).waveLength);
+                            
+                            dp = nnz(oldIdx==obj(ii).index)/length(obj(ii).index) - pAligned;
+                            pAligned = nnz(oldIdx==obj(ii).index)/length(obj(ii).index);
+                            
+                            outOfBounds = obj(ii).index < spkLim(1) | obj(ii).index > spkLim(2);
+                            obj(ii).index(outOfBounds) = [];
+                            obj(ii).label(outOfBounds) = [];
+                            obj(ii).waveform(outOfBounds,:) = [];
+                            
+                            [w,s] = spktrig(v(:,ii),num2cell(obj(ii).index),obj(ii).waveLength);
+                            obj(ii).waveform = cell2mat(w);
+                            obj(ii).index = cell2mat(s);
+                        end
+                        
+                        % remove refractory period violations
+                        refViol = diff(obj(ii).index/obj(ii).Fs) < 5e-4;
+                        obj(ii).index(refViol) = [];
+                        obj(ii).label(refViol) = [];
+                        obj(ii).waveform(refViol,:) = [];
+                        
+                        % center mean waveform mass
+                        wEnv = smooth1D(abs(obj(ii).waveform),obj(ii).Fs,'gau','sd',5e-4,'dim',2);
+                        [~,pkIdx] = max(mean(wEnv,1));
+                        ds = obj(ii).waveLength/2 - pkIdx;
+                        [w,s] = spktrig(v(:,ii),num2cell(obj(ii).index - ds),obj(ii).waveLength);
+                        obj(ii).waveform = cell2mat(w);
+                        obj(ii).index = cell2mat(s);
+                    end
             end
         end
         % -----------------------------------------------------------------
@@ -352,6 +467,7 @@ classdef Spike
             addParameter(P,'mask',[],@islogical)
             addParameter(P,'label',[],@isnumeric)
             addParameter(P,'lim',[],@(x) length(x)==2 && x(2)>x(1))
+            addParameter(P,'nBins',[],@(x) isnumeric(x))
             addParameter(P,'ppp',[],@isnumeric)
             addParameter(P,'sort','energy',@(x) ischar(x) && ismember(x,{'id','size','energy','entropy'}))
             parse(P,varargin{:})
@@ -363,7 +479,7 @@ classdef Spike
                 for ii = 1:length(obj)
                     if obj(ii).count > 0
                         subplot(nRow,nCol,ii)
-                        histfun(obj(ii).waveform,'plot',true,'lim',P.Results.lim);
+                        histfun(obj(ii).waveform,'plot',true,'lim',P.Results.lim,'nBins',P.Results.nBins);
                     end
                 end
             else
@@ -376,7 +492,7 @@ classdef Spike
                 
                 if nnz(unique(obj.label)>0) < 2
                     mask = (obj.label == max(unique(obj.label)));
-                    histfun(obj.waveform(mask,:),'plot',true,'lim',P.Results.lim);
+                    histfun(obj.waveform(mask,:),'plot',true,'lim',P.Results.lim,'nBins',P.Results.nBins);
                     title(sprintf('%i waveforms',nnz(mask)))
                     
                 else
@@ -411,7 +527,7 @@ classdef Spike
                             if nnz(obj.label==unitNo(srtIdx(ii))) <= 1
                                 continue
                             end
-                            histfun(obj.waveform(obj.label==unitNo(srtIdx(ii)),:),'plot',true,'lim',P.Results.lim);
+                            histfun(obj.waveform(obj.label==unitNo(srtIdx(ii)),:),'plot',true,'lim',P.Results.lim,'nBins',P.Results.nBins);
                             cid = obj.Clus.id == obj.Clus.id(srtIdx(ii));
                             title(sprintf('unit %i\nn=%i, H=%.2f, |w|^2=%.2f',unitNo(srtIdx(ii)),...
                                 obj.Clus.size(cid), obj.Clus.entropy(cid), obj.Clus.energy(cid)))
@@ -451,7 +567,7 @@ classdef Spike
                 pm = [pm, repmat({'color'},size(pm,1),1), repmat(mat2cell(colors,ones(size(colors,1),1),3),length(markers),1)];
                 % plot
                 hold on
-                clusNo = setdiff(unique(abs(obj.label)), min(obj.label):-1);
+                clusNo = setdiff(unique(abs(obj.label)), min(obj.label):-1:0);
                 nClus = length(clusNo);
                 legText = [];
                 % unlabeled

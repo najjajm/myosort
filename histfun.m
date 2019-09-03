@@ -4,7 +4,7 @@
 % individual trace would be computationally expensive.
 %
 % SYNTAX
-%   [counts, bins] = histfun(Y, varargin)
+%   [counts, bins, logCounts] = histfun(Y, varargin)
 %
 % REQUIRED INPUTS
 %   Y (numeric): array of functions (observations x samples)
@@ -22,7 +22,10 @@
 %
 % OUTPUTS
 %   counts (numeric): 2D array of function counts at each bin and sample
+%
 %   bins (numeric): bins used for constructing the histogram
+%
+%   logCounts (numeric): filtered log counts used for plotting
 %
 % EXAMPLE
 %
@@ -54,7 +57,7 @@
 % Emails: njm2149@columbia.edu
 % Dated: April 2018
 
-function [counts, bins] = histfun(Y, varargin)
+function [counts, bins, logCounts] = histfun(Y, varargin)
 %% Parse inputs
 
 % initialize input parser
@@ -107,7 +110,7 @@ T = size(Y,2);
 % bin limits
 lim = P.Results.lim;
 if isempty(lim)
-    lim = double([floor(min(Y(:))), ceil(max(Y(:)))]);
+    lim = 1.5*double([floor(min(Y(:))), ceil(max(Y(:)))]);
 end      
 
 % bin samples
@@ -126,11 +129,6 @@ end
 
 %% Plot
 
-if ~P.Results.plot
-    counts = cell2mat(counts);
-    return
-end
-
 % filter counts
 filtCounts = cell2mat(cellfun(@(x) smooth1D(x,1,'gau','sd',1), counts, 'uni', false));
 counts = cell2mat(counts);
@@ -138,6 +136,10 @@ counts = cell2mat(counts);
 % log filtered counts
 epsilon = 10^ceil(log10(abs(min(filtCounts(:)))));
 logCounts = log(filtCounts/100 + epsilon);
+
+if ~P.Results.plot
+    return
+end
 
 % plot heat map
 if isempty(P.Results.axes)
@@ -147,7 +149,6 @@ else
 end
 cla(ax,'reset')
 imagesc(ax,logCounts);
-set(ax,'yLim',[1 nBins])
 set(ax,'xLim',[1 T])
 
 % color bar
@@ -157,11 +158,6 @@ colorbar('peer',ax)
 % truncate color axis to emphasize noise
 cax = caxis(ax);
 caxis(ax,[cax(1)/4, cax(2)])
-
-% display count
-if ~isempty(P.Results.count)
-    text(ax,0.05*T,0.975*nBins,sprintf('%i',P.Results.count),'color','w','fontsize',15)
-end
 
 % set y-axis values to increasing
 set(ax,'ydir','normal')
@@ -176,6 +172,7 @@ if ~inputCell
     else
         [~,yt] = min(abs(bins(:)-P.Results.yTick(:)'),[],1);
     end
+    set(ax,'yLim',[1 nBins])
 else
     yTickVal = 1/2;
     yTickPos = [baseline-yTickVal, baseline, baseline+fliplr(yTickVal)];
@@ -187,8 +184,17 @@ else
     yTickPos = flipud(yTickPos);
     
     [~,yt] = min(abs(bins(:)-yTickPos(:)'),[],1);
+    
+    [~,yl] = min(abs(bins(:)-[-1.5 baseline(1)+1.5]),[],1);
+    set(ax,'yLim',yl)
 end
-set(ax,'yTick',yt);
+set(ax,'yTick',yt)
+
+% display count
+if ~isempty(P.Results.count)
+    yl = get(ax,'yLim');
+    text(ax,0.05*T,0.95*yl(2),sprintf('n = %i',P.Results.count),'color','w','fontsize',15)
+end
 
 % y-tick labels
 if ~inputCell
