@@ -65,6 +65,8 @@ addParameter(P, 'yTick', [2/3 1/3], @(x) isnumeric(x) && all(x<=1) && all(x>0) &
 addParameter(P, 'chanNo', 1:size(u,2), @isnumeric)
 addParameter(P, 'xTickLabel', [], @iscell)
 addParameter(P, 'chanLabels', 'on', @(x) ischar(x) && ismember(x,{'on','off'}))
+addParameter(P, 'recenter', false, @islogical)
+addParameter(P, 'frame', 1, @(x) isscalarnum(x,0,1+eps))
 addParameter(P, 'axes', [], @(x) isempty(x) || isa(x,'matlab.ui.control.UIAxes') || isa(x,'matlab.graphics.axis.Axes'))
 
 % clear workspace (parser object retains the data while staying small)
@@ -83,8 +85,26 @@ else
     u = u./yAbsLim;
 end
 
+% set frame
+len = round(waveLen*P.Results.frame);
+win = -len/2:len/2-1;
+
+% wave norm
+if P.Results.recenter
+    pkIdx = zeros(nChan,nUnit);
+    for ch = 1:nChan
+        for un = 1:nUnit
+            wNorm = smooth1D(u(:,ch,un).^2,3e4,'gau','sd',2e-3);
+            [~,pkIdx(ch,un)] = max(wNorm);
+        end
+    end
+    com = round(mean(pkIdx,1));
+else
+    com = repmat(1+waveLen/2,1,nUnit);
+end
+
 % horizontal and vertical offsets
-xPos = [0,cumsum(repmat((1+P.Results.xPad)*size(u,1),1,nUnit-1))];
+xPos = [0,cumsum(repmat((1+P.Results.xPad)*len,1,nUnit-1))];
 yPos = flipud([0;cumsum((1+P.Results.yPad)*2*ones(nChan-1,1))]);
 
 % y-tick position and values
@@ -113,12 +133,12 @@ cla(ax,'reset')
 hold(ax,'on')
 for ch = 1:nChan
     for un = 1:nUnit
-        plot(ax,xPos(un)+(1:waveLen),u(:,ch,un)+yPos(ch),'color',cmap(un,:));
+        plot(ax,xPos(un)+(1:len),u(win+com(un),ch,un)+yPos(ch),'color',cmap(un,:));
     end
 end
 
 % x labels
-set(ax,'xtick',xPos+waveLen/2)
+set(ax,'xtick',xPos+len/2)
 unitNo = num2cell(1:nUnit);
 if isempty(P.Results.xTickLabel)
     set(ax,'xticklabel',cellfun(@(x) sprintf('unit %i',x),unitNo,'uni',false))
@@ -133,12 +153,12 @@ set(ax,'yTickLabel',cellfun(@num2str,flipud(num2cell(yTick)),'uni',false))
 % channel numbers
 if strcmp(P.Results.chanLabels,'on')
     for ch = 1:nChan
-        text(ax,1.01*(waveLen+xPos(end)),yPos(ch),['channel ' num2str(P.Results.chanNo(ch))],'fontsize',14)
+        text(ax,1.01*(len+xPos(end)),yPos(ch),['channel ' num2str(P.Results.chanNo(ch))],'fontsize',14)
     end
 end
 
 set(ax,'fontsize',14)
 
 axis(ax,'tight')
-set(ax,'xlim',[0, xPos(end)+waveLen])
+set(ax,'xlim',[0, xPos(end)+len])
 set(ax,'ylim',[-1, yPos(1)+1])

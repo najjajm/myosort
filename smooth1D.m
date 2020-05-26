@@ -31,8 +31,47 @@
 % OUTPUTS
 %   Y (numeric): smoothed input
 %
-% EXAMPLE(S)
+% EXAMPLES
 %
+%   % demonstrate that it works by filtering a delta function
+%   Fs = 1e3;
+%   t = -1:1/Fs:1;
+%   x = zeros(size(t));
+%   x(t==0) = 1;
+%
+%   % filter with 10, 50, and 100 ms Gaussians
+%   figure
+%   plot(t,x,'k')
+%   hold on
+%   for sd = [10,50,100]*1e-3
+%       plot(t,smooth1D(x,Fs,'gau',true,'sd',sd))
+%   end
+%   set(gca,'ylim',[0 1])
+%
+%   % filter with 250 and 500 ms boxcar
+%   figure
+%   plot(t,x,'k')
+%   hold on
+%   for wid = [250,500]*1e-3
+%       plot(t,smooth1D(x,Fs,'box',true,'wid',wid))
+%   end
+%   set(gca,'xtick',-1:0.125:1)
+%   set(gca,'ylim',[0 1])
+%
+%   % filter multiple inputs at once
+%   N = 100;
+%   x = zeros(length(t),N);
+%   for ii = 1:N
+%       x(t==round(rand-0.5,log10(Fs)),ii) = 1;
+%   end
+%   figure
+%   plot(smooth1D(x,Fs,'gau'),'k')
+%
+%   % filter along an arbitrary dimension (will be the same as above)
+%   x = permute(x,[3 2 1]);
+%   y = smooth1D(x,Fs,'gau','dim',3);
+%   figure
+%   plot(permute(y,[3 2 1]),'k')
 %
 % IMPLEMENTATION
 % Other m-files required: none
@@ -120,7 +159,8 @@ end
 
 % pad x to the length of the impulse response
 padLen = min(floor(length(fx)/2), szX(filtDim));
-Xpad = permute(double(X),[filtDim,setdiff(1:ndims(X),filtDim)]);
+permOrd = [filtDim,setdiff(1:ndims(X),filtDim)];
+Xpad = permute(double(X),permOrd);
 Xpad = cat(1,mean(Xpad(1:padLen,:,:),1).*ones(padLen,size(Xpad,2),size(Xpad,3)), Xpad,...
             mean(Xpad(end-padLen+1:end,:,:),1).*ones(padLen,size(Xpad,2),size(Xpad,3)));
 
@@ -132,11 +172,8 @@ Y = ifft(fft(Xpad,nPad).*fft(fx(:),nPad));
 Y = Y(2*padLen + (1:szX(filtDim)),:,:);
 
 % reshape to input dimensions
-shiftOrd = zeros(1,ndims(X));
-for ii = 1:ndims(X)
-    shiftOrd(ii) = find(size(Y)==szX(ii));
-end
-Y = permute(Y,shiftOrd);
+[~,unpermOrd] = sort(permOrd);
+Y = permute(Y,unpermOrd);
 
 % normalize by magnitude of impulse response
 if P.Results.norm

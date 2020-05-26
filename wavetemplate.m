@@ -95,7 +95,7 @@ else % re-estimate template based on maximum probability density
             
             [~,b,lc] = histfun(w{ii,jj},'lim',yl);
             [~,maxIdx] = max(lc,[],1);
-            u(:,jj,ii) = smooth1D(b(maxIdx)',P.Results.Fs,'gau','sd',1e-4);
+            u(:,jj,ii) = smooth1D(b(maxIdx)',P.Results.Fs,'gau','sd',5e-5);
         end 
     end
 end

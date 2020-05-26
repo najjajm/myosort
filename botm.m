@@ -47,8 +47,10 @@ addRequired(P, 'Fs', @isnumeric)
 addRequired(P, 'template', @isnumeric)
 addRequired(P, 'Cinv', @isnumeric)
 addParameter(P, 'prior', 0.01, @(x) isscalarnum(x,0,1))
+addParameter(P, 'gain', 1, @(x) isscalarnum(x,0,Inf))
 addParameter(P, 'sic', true, @islogical)
-addParameter(P, 'plot', {''}, @(x) iscell(x) && all(ismember(x,{'','fit','res','resen','rec','dis'})))
+addParameter(P, 'refDur', 0, @(x) isscalarnum(x,-eps,Inf))
+addParameter(P, 'plot', {''}, @(x) iscell(x) && all(ismember(x,{'','fit','fitTight','res','resen','rec','dis'})))
 addParameter(P, 'cmap', 'Spectral', @(x) ischar(x) || (isnumeric(x) && size(x,2)==3))
 addParameter(P, 'bright', -0.2, @(x) isscalarnum(x,-1,1))
 addParameter(P, 'verbose', false, @islogical)
@@ -72,16 +74,18 @@ w = cellfun(@(x) reshape(x,waveLen,nChan), w, 'uni', false);
 u = cellfun(@(x) reshape(x,waveLen,nChan), u, 'uni', false);
 
 % filter cross-correlation
-len = 2*waveLen-1;
-nPad = 2^nextpow2(len);
-wFT = cellfun(@(x) fft(x,nPad,1),w,'uni',false);
-uFT = cellfun(@(x) fft(flipud(x),nPad,1),u,'uni',false);
-fProj = zeros(nUnit,nUnit,len);
-for ii = 1:nUnit
-    for jj = 1:nUnit
-        if ii~=jj
-            y = sum(ifft(wFT{ii}.*uFT{jj},[],1),2);
-            fProj(ii,jj,:) = reshape(y(1:len),1,1,len);
+if P.Results.sic
+    len = 2*waveLen-1;
+    nPad = 2^nextpow2(len);
+    wFT = cellfun(@(x) fft(x,nPad,1),w,'uni',false);
+    uFT = cellfun(@(x) fft(flipud(x),nPad,1),u,'uni',false);
+    fProj = zeros(nUnit,nUnit,len);
+    for ii = 1:nUnit
+        for jj = 1:nUnit
+            if ii~=jj
+                y = sum(ifft(wFT{ii}.*uFT{jj},[],1),2);
+                fProj(ii,jj,:) = reshape(y(1:len),1,1,len);
+            end
         end
     end
 end
@@ -90,7 +94,7 @@ lags = (1-waveLen):(waveLen-1);
 % whitened filter energy
 filtEner = zeros(nChan,nUnit);
 for ii = 1:nChan
-    filtEner(ii,:) = cellfun(@(a,b) -1/2*a(:,ii)'*b(:,ii), w, u);
+    filtEner(ii,:) = cellfun(@(a,b) P.Results.gain * -1/2*a(:,ii)'*b(:,ii), w, u);
 end
 
 % filter constant
@@ -110,7 +114,7 @@ end
 nPad = 2^nextpow2(nDataPoints+waveLen/2-1);
 d = zeros(nDataPoints,nUnit);
 for ch = 1:nChan
-    XFT = fft(X(:,ch),nPad,1);
+    XFT = fft(double(X(:,ch)),nPad,1);
     for un = 1:nUnit
         y = ifft(XFT .* fft(flipud(u{un}(:,ch)),nPad));
         d(:,un) = d(:,un) + y(waveLen/2-1+(1:nDataPoints)) + filtConst(ch,un);
@@ -135,21 +139,87 @@ for un = 1:nUnit
     spkIdx{un} = spkIdx{un}(spkIdx{un}>waveLen & spkIdx{un}<nDataPoints-waveLen);
 end
 
+% extract the discriminant at each spike
+% dSpk = (thr-eps) * ones(nDataPoints,nUnit);
+% for un = 1:nUnit
+%     dSpk(spkIdx{un},un) = d(spkIdx{un},un);
+% end
+
+for un = 1:nUnit
+    s = false(nDataPoints,1);
+    s(spkIdx{un}) = true;
+    d(~s,un) = (thr-eps);
+end
+
 if P.Results.verbose
     fprintf('Runtime: %.2f min\n',toc(t0)/60)
 end
+
+%% Remove refractory period violations
+
+if P.Results.refDur > 0
+    
+    if P.Results.verbose
+        fprintf('Removing refractory period violations. ')
+        t0 = tic;
+    end
+    
+    for un = 1:nUnit
+        
+        % convert spike indices to pulse trains
+        s = zeros(1,nDataPoints);
+        s(spkIdx{un}) = 1;
+    
+        % detect putative refractory period violations
+        y = double(smooth1D(s,Fs,'box','wid',P.Results.refDur/2,'dim',2));
+        y = y.*(y>0.5);
+        
+        dy = [NaN,diff(y)];
+        yOn = find(dy(2:end)>0.5 & dy(1:end-1)==0 & y(1:end-1)<0.5);
+        yOff = find(dy(1:end-1)<-0.5 & dy(2:end)==0 & y(2:end)<0.5);
+        yLim = mat2cell([yOn(:),yOff(:)],ones(length(yOn),1),2);
+        
+        refLim = cell2mat(yLim);
+        
+        rmvSpk = false(size(spkIdx{un}));
+        
+        for ii = 1:size(refLim,1)
+            
+            binIdx = spkIdx{un}>=refLim(ii,1) & spkIdx{un}<=refLim(ii,2);
+            spksInBin = spkIdx{un}(binIdx);
+            si = find(binIdx);
+            rmvIdx = false(size(si));
+            
+            dBin = d(spksInBin,un);
+            [~,srtIdx] = sort(dBin,'descend');
+            spksInBin = spksInBin(srtIdx);
+            si = si(srtIdx);
+            
+            for jj = 1:length(si)-1
+                if ~rmvIdx(jj)
+                    dt = abs(spksInBin - spksInBin(jj))/Fs;
+                    rmvIdx(dt>0 & dt<=P.Results.refDur) = true;
+                end                
+            end    
+            
+            rmvSpk(si(rmvIdx)) = true;
+        end
+        
+        d(spkIdx{un}(rmvSpk),un) = thr-eps;
+        spkIdx{un}(rmvSpk) = [];
+    end
+    
+    if P.Results.verbose
+        fprintf('Runtime: %.2f min\n',toc(t0)/60)
+    end
+end
+    
 
 %% Subtractive interference cancellation
 
 if P.Results.verbose
     fprintf('Running SIC. ')
     t0 = tic;
-end
-
-% extract the discriminant at each spike
-dSpk = (thr-eps) * ones(nDataPoints,nUnit);
-for un = 1:nUnit
-    dSpk(spkIdx{un},un) = d(spkIdx{un},un);
 end
 
 if P.Results.sic && nnz(~cellfun(@isempty,spkIdx)) > 1
@@ -197,7 +267,7 @@ if P.Results.sic && nnz(~cellfun(@isempty,spkIdx)) > 1
             for jj = 1:nSpks-1
                 t1 = spksInBin(1,jj);
                 u1 = spksInBin(2,jj);
-                if dSpk(t1,u1) < thr
+                if d(t1,u1) < thr
                     continue
                 end
                 for kk = (1+jj):nSpks
@@ -210,7 +280,7 @@ if P.Results.sic && nnz(~cellfun(@isempty,spkIdx)) > 1
                     if abs(tau) > waveLen-1
                         continue
                     end
-                    dSpk(t2,u2) = dSpk(t2,u2) - fProj(u2,u1,lags==tau);
+                    d(t2,u2) = d(t2,u2) - fProj(u2,u1,lags==tau);
                 end
             end
         end
@@ -218,7 +288,7 @@ if P.Results.sic && nnz(~cellfun(@isempty,spkIdx)) > 1
         % update spike estimate
         spkIdx = cell(1,nUnit);
         for un = 1:nUnit
-            [~,spkIdx{un}] = findpeaks(dSpk(:,un),'MinPeakHeight',thr);
+            [~,spkIdx{un}] = findpeaks(d(:,un),'MinPeakHeight',thr);
             spkIdx{un} = spkIdx{un}(spkIdx{un}>waveLen & spkIdx{un}<nDataPoints-waveLen);
         end
     end
@@ -230,38 +300,48 @@ end
 
 %% Residual energy
 
-if P.Results.verbose
-    fprintf('Computing residual energy. ')
-    t0 = tic;
-end
-
-% identify spike regions
-allSpk = findpulses(X,Fs,'dim',1,'OutputFormat','logical');
-spkRegion = smooth1D(double(allSpk),Fs,'box','wid',waveLen/(2*Fs),'dim',1);
-
-resEner = cell(1,2);
-resEner(:) = {zeros(nUnit,nChan)};
-s = zeros(nDataPoints,1);
-for un = 1:nUnit
-    s = s*0;
-    s(spkIdx{un}) = 1;
-    for ch = 1:nChan
-        res = X(:,ch) - conv(s,template(:,ch,un),'same');
-        resEner{1}(un,ch) = sum(res.^2);
-        resEner{2}(un,ch) = sum(res(spkRegion(:,ch)>0.5).^2);
+if nargout > 2 || ismember('resen',P.Results.plot)
+    if P.Results.verbose
+        fprintf('Computing residual energy. ')
+        t0 = tic;
     end
-end
-resEner{1} = (resEner{1}./sum(X.^2,1))';
-for ch = 1:nChan
-    resEner{2}(:,ch) = resEner{2}(:,ch)./sum(X(spkRegion(:,ch)>0.5,ch).^2);
-end
-resEner{2} = resEner{2}';
-
-if P.Results.verbose
-    fprintf('Runtime: %.2f min\n',toc(t0)/60)
+    
+    X = double(X);
+    
+    % identify spike regions
+    allSpk = findpulses(X,Fs,'dim',1,'OutputFormat','logical');
+    spkRegion = smooth1D(double(allSpk),Fs,'box','wid',waveLen/(2*Fs),'dim',1);
+    
+    resEner = cell(1,2);
+    resEner(:) = {zeros(nUnit,nChan)};
+    s = zeros(nDataPoints,1);
+    for un = 1:nUnit
+        s = s*0;
+        s(spkIdx{un}) = 1;
+        for ch = 1:nChan
+            res = X(:,ch) - conv(s,template(:,ch,un),'same');
+            resEner{1}(un,ch) = sum(res.^2);
+            resEner{2}(un,ch) = sum(res(spkRegion(:,ch)>0.5).^2);
+        end
+    end
+    resEner{1} = (resEner{1}./sum(X.^2,1))';
+    for ch = 1:nChan
+        resEner{2}(:,ch) = resEner{2}(:,ch)./sum(X(spkRegion(:,ch)>0.5,ch).^2);
+    end
+    resEner{2} = resEner{2}';
+    
+    if P.Results.verbose
+        fprintf('Runtime: %.2f min\n',toc(t0)/60)
+    end
+else
+    resEner = [];
 end
 
 %% Plotting
+
+if all(cellfun(@isempty,P.Results.plot))
+    return
+end
 
 % color map
 cmap = P.Results.cmap;
@@ -281,6 +361,19 @@ end
 figIdx = 1;
 
 t = (1:nDataPoints)/Fs;
+
+% vertical offsets
+Y_PAD = 0.1;
+Y_TICK = [2/3 1/3];
+
+yLim = double(max(abs(X),[],1));
+yPos = flipud([0;cumsum((1+Y_PAD)*2*ones(nChan-1,1))]);
+
+yTickPos = [yPos-Y_TICK, yPos, yPos+fliplr(Y_TICK)];
+yTick = round((yTickPos - yPos).*yLim(:));
+
+yTickPos = reshape(fliplr(yTickPos)',(1+2*length(Y_TICK))*nChan,1);
+yTick = reshape(fliplr(yTick)',(1+2*length(Y_TICK))*nChan,1);
 
 % discriminant
 if ismember('dis',P.Results.plot)
@@ -305,7 +398,7 @@ if ismember('dis',P.Results.plot)
     ax(2) = subplot(212);
     hold on
     for ii = 1:nUnit
-        plot(dSpk(:,ii),'color',cmap(ii,:),'linewidth',1.5)
+        plot(d(:,ii),'color',cmap(ii,:),'linewidth',1.5)
     end
     title('post-SIC')
     set(gca,'xlim',[1 size(d,1)])
@@ -316,7 +409,7 @@ if ismember('dis',P.Results.plot)
 end
 
 % single unit fits
-if ismember('fit',P.Results.plot)    
+if ismember('fit',P.Results.plot) || ismember('fitTight',P.Results.plot)  
     if holdFig
         figure(figNo(figIdx))
         clf
@@ -324,40 +417,53 @@ if ismember('fit',P.Results.plot)
     else
         figure
     end
-    ax = zeros(1,nChan);
+    hold on
     s = zeros(nDataPoints,1);
+%     ax = [];
+    fh = [];
     for ch = 1:nChan
         
-        ax(ch) = subplot(nChan,1,ch);
-        fh = plot(t,X(:,ch),'color',[0 0 0 0.25],'linewidth',1.5);
-        fh.Color(4) = 0.25;
+%         ax(ch) = subplot(nChan,1,ch);
+        plot(t,double(X(:,ch))/yLim(ch)+yPos(ch),'color',[0 0 0 0.25],'linewidth',2.5);
         hold on
         
-        fh = [];
-        len = waveLen/2;
-        frame = -len/2:len/2-1;
-        for un = 1:nUnit
-%             for kk = 1:length(spkIdx{un})
-%                 fh(un) = plot(t(frame+spkIdx{un}(kk)),template(frame+waveLen/2,ch,un),'color',cmap(un,:),'linewidth',1.5);
-%             end
-            s = s*0;
-            s(spkIdx{un}) = 1;
-            fh(un) = plot(t,conv(s,template(:,ch,un),'same'),'color',cmap(un,:),'linewidth',1.25);
+        if ismember('fitTight',P.Results.plot)
+            mask = wavetemplatemask(template, Fs, 'noiseThr',0);
+            mask(:) = {true(waveLen,1)};
         end
         
-        ylabel(sprintf('channel %i',ch))
-        box off
-        if ch == 1
-            title('single unit fits')
+        for un = 1:nUnit
+            if ismember('fit',P.Results.plot)
+                s = s*0;
+                s(spkIdx{un}) = 1;
+                fh(un) = plot(t,conv(s,template(:,ch,un),'same')/yLim(ch)+yPos(ch),'color',cmap(un,:),'linewidth',1.5);
+            else
+                spkIdx{un}(spkIdx{un}<waveLen | spkIdx{un}>nDataPoints-waveLen) = [];
+                frame = -waveLen/2:waveLen/2-1; %find(mask{ch,un}) - waveLen/2;
+                frameMid = frame==0; %round(length(frame)/2);
+                if isempty(frame)
+                    continue
+                end
+                txtPos = 1.15*(max(template(:,ch,un))/yLim(ch))+yPos(ch);
+                for kk = 1:length(spkIdx{un})
+                    fh(un) = plot(t(frame+spkIdx{un}(kk)),template(mask{ch,un},ch,un)/yLim(ch)+yPos(ch),'color',cmap(un,:),'linewidth',2);
+                    text(t(frame(frameMid)+spkIdx{un}(kk)),txtPos,num2str(un),'HorizontalAlignment','center','FontSize',10,'color',cmap(un,:))
+                end
+            end
         end
+        
         if ch == nChan
             uNo = num2cell(1:nUnit);
             isPlotted = ~cellfun(@isempty,spkIdx);
             legend(fh(isPlotted),cellfun(@(n) sprintf('unit %i',n),uNo(isPlotted),'uni',false))
         end
     end
-    linkaxes(ax,'x')
+%     linkaxes(ax,'x')
     set(gca,'xlim',t([1 end]))
+    
+    set(gca,'ylim',[-1, yPos(1)+1])
+    set(gca,'ytick',flipud(yTickPos))
+    set(gca,'yTickLabel',cellfun(@num2str,flipud(num2cell(yTick)),'uni',false))
 end
 
 % reconstruction
@@ -369,12 +475,13 @@ if ismember('rec',P.Results.plot)
     else
         figure
     end
-    ax = zeros(1,nChan);
+    hold on
     s = zeros(nDataPoints,1);
+    ax = [];
     for ch = 1:nChan
         
-        ax(ch) = subplot(nChan,1,ch);
-        plot(t,X(:,ch),'k','linewidth',1);
+        ax = subplot(nChan,1,ch);
+        plot(t,double(X(:,ch)),'k','linewidth',1);
         hold on
         
         rec = zeros(nDataPoints,1);
@@ -386,23 +493,25 @@ if ismember('rec',P.Results.plot)
             end
         end
         plot(t,rec,'c')
-        
-        if ch == 1
-            title('original (black) and reconstructed (cyan) signal')
-        end
-        ylabel(sprintf('channel %i',ch))
-        box off
     end
+    title('original (black) and reconstructed (cyan) signal')
     linkaxes(ax,'x')
-%     sgtitle('original (black) and reconstructed (cyan) signal')
     set(gca,'xlim',t([1 end]))
+    
+%     set(gca,'ylim',[-1, yPos(1)+1])
+%     set(gca,'ytick',flipud(yTickPos))
+%     set(gca,'yTickLabel',cellfun(@num2str,flipud(num2cell(yTick)),'uni',false))
+    
+%     for ch = 1:nChan
+%         text(gca,1.01*(len+t(end)),yPos(ch),['channel ' num2str(ch)],'fontsize',14)
+%     end
 end
 
 % residual
 if ismember('res',P.Results.plot)
    
    s = zeros(nDataPoints,1);
-   res = X;
+   res = double(X);
    for un = 1:nUnit
        s = s*0;
        s(spkIdx{un}) = 1;
@@ -418,22 +527,26 @@ if ismember('res',P.Results.plot)
    else
        figure
    end
-   
-   ax = zeros(1,nChan);
+   hold on
+   ax = [];
    for ch = 1:nChan
        ax(ch) = subplot(nChan,1,ch);
-       plot(t,X(:,ch),'k');
+       plot(t,double(X(:,ch)),'k');
        hold on
        plot(t,res(:,ch),'r');
-       
-       if ch == 1
-           title('raw (black) and residual (red)')
-       end
-       ylabel(sprintf('channel %i',ch))
-       box off
    end
+   title('raw (black) and residual (red)')
+   
    linkaxes(ax,'x')
    set(gca,'xlim',t([1 end]))
+   
+%    set(gca,'ylim',[-1, yPos(1)+1])
+%    set(gca,'ytick',flipud(yTickPos))
+%    set(gca,'yTickLabel',cellfun(@num2str,flipud(num2cell(yTick)),'uni',false))
+   
+%    for ch = 1:nChan
+%        text(gca,1.01*(len+t(end)),yPos(ch),['channel ' num2str(ch)],'fontsize',14)
+%    end
 end
 
 % residual energy
@@ -530,7 +643,7 @@ end
 %     ax(2) = subplot(212);
 %     hold on
 %     for jj = 1:nUnit
-%         plot(dSpk{jj},'color',cmap(jj,:))
+%         plot(d{jj},'color',cmap(jj,:))
 %     end
 %     yline(thr,'color',0.8*[1 1 1]);
 %     linkaxes(ax,'x')

@@ -40,10 +40,16 @@
 %   freq = num2cell(params(:,2));
 %   Y = cell2mat(cellfun(@(A,f,sig) A*sin(2*pi*f*t)+normrnd(0,sig,size(t)), amp, freq, num2cell(randi(2,[N,1])), 'uni', false));
 %
-%   % plot histogram
+%   % plot a subset of lines
+%   figure
+%   plot(Y(datasample(1:size(Y,1),10),:)','k')
+%
+%   % plot histogram of all lines
+%   figure
 %   histfun(Y,'plot',true);
 %
-%   % constrain limits and only show extrema
+%   % constrain limits and tick marks
+%   figure
 %   histfun(Y,'plot',true,'lim',[-30 30],'nYTick',3);
 %
 % IMPLEMENTATION
@@ -136,6 +142,9 @@ counts = cell2mat(counts);
 % log filtered counts
 epsilon = 10^ceil(log10(abs(min(filtCounts(:)))));
 logCounts = log(filtCounts/100 + epsilon);
+% logCounts = logCounts - min(logCounts(:));
+% logCounts = logCounts/max(logCounts(:));
+
 
 if ~P.Results.plot
     return

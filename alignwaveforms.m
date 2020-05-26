@@ -1,57 +1,36 @@
-%% ALIGNWAVEFORMS align spike waveforms
-% Aligns spike waveforms from time series data. By default, shifts spike
-% indices to be centered at the point of maximum squared amplitude for each
-% waveform, but alignment can also be performed on the smoothed waveform
-% envelopes. Since each shifting operation can introduce new maxima to the
-% waveform window, alignment is run for several iterations until the
-% percentage of properly aligned converges within some tolerance or until
-% the number of iterations hits a hard limit. Can optionally remove any 
-% spikes that coincide within a refractory period through the course of
-% alignment. Removes any remaining misaligned waveforms and spike indices.
+%% ALIGNWAVEFORMS align multi-channel waveforms
+% Function details
 %
 % SYNTAX
-%   [waves, waveIdx] = alignwaveforms(X, Fs, spkIdx, varargin)
+%   outputs = functiontemplate(inputs, varargin)
 %
 % REQUIRED INPUTS
-%   X (numeric): time series array (channels x samples)
-%   Fs (scalar): sample frequency in Hz
-%   spkIdx (numeric): spike indices
+%   reqIn (class): description
 %
-% OPTIONAL INPUTS: none
+% OPTIONAL INPUTS
+%   optIn (class): description
 %
 % PARAMETER INPUTS
-%   'method', <char>: if 'amp' (default), aligns to the index 
-%       corresponding to the largest squared amplitude for each waveform. 
-%       If 'env', aligns to the index corresponding to the peak in the 
-%       waveform envelope (post-rectification and filtering)
-%
-%   'waveDur', <scalar>: waveform duration in seconds (default: 3e-3)
-%
-%   'refDur', <scalar>: refractory duration in seconds (default: 0)
-%
-%   'tol', <scalar>: tolerance on proportion of waveforms properly aligned. 
-%       Must be bounded between 0 and 1. Alignment stops after tolerance is
-%       reached (or number of iterations hits limit). (default: 0.99)
-%
-%   'maxIter', <integer>: limit on number of passes through the data
-%       before alignment stops. (default: 10)
+%   'parameterName', <argument class>: description (default: )
 %
 % OUTPUTS
-%   waves (numeric): array of waveform shapes (observations x wave length)
-%   spkIdx (numeric): aligned spike indices
+%   out1 (class): description
+%
+% EXAMPLE(S) 
+%
 %
 % IMPLEMENTATION
-% Other m-files required: SPKTRIG
-% Subfunctions: SPKTRIG
+% Other m-files required: none
+% Subfunctions: none
 % MAT-files required: none
 %
-% SEE ALSO: SPIKE, SPKTRIG
+% SEE ALSO:
 
 % Authors: Najja Marshall
 % Emails: njm2149@columbia.edu
-% Dated: July 2017
+% Dated:
 
-function [waves, spkIdx] = alignwaveforms(X, Fs, spkIdx, varargin)
+function [waveformsAligned, spkIdxAligned, dS] = alignwaveforms(X, Fs, waveforms, spkIdx, varargin)
 %% Parse inputs
 
 % initialize input parser
@@ -59,88 +38,203 @@ P = inputParser;
 P.FunctionName = 'ALIGNWAVEFORMS';
 
 % validation functions
-isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
+% isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
 
 % add required, optional, and parameter-value pair arguments
 addRequired(P, 'X', @isnumeric)
-addRequired(P, 'Fs', @(x) isscalarnum(x,0,Inf))
+addRequired(P, 'Fs', @isscalar)
+addRequired(P, 'waveforms', @isnumeric)
 addRequired(P, 'spkIdx', @isnumeric)
-addParameter(P, 'method', 'amp', @(x) ischar(x) && ismember(x,{'amp','env'}))
-addParameter(P, 'waveDur', 3e-3, @(x) isscalarnum(x,0,50e-3))
-addParameter(P, 'refDur', 0, @(x) isscalarnum(x,0,10e-3))
-addParameter(P, 'tol', 0.99, @(x) isscalarnum(x,0,1))
-addParameter(P, 'maxIter', 10, @(x) isscalarnum(x,0,Inf) && x==round(x))
+% addOptional(P, 'optIn', default, validationFunction)
+addParameter(P, 'batchSize', 100, @isnumeric)
 
 % clear workspace (parser object retains the data while staying small)
-parse(P, X, Fs, spkIdx, varargin{:});
+parse(P, X, Fs, waveforms, spkIdx, varargin{:});
 clear ans varargin
 
-%% Extract waveforms, centered on spike locations
+%% Create sort hierarchy
 
-% orient spikes vertically
-spkIdx = spkIdx(:);
+% waveform energy
+wEner = squeeze(sqrt(sum(waveforms.^2,2)))';
 
-% length of refractory period in samples
-refLen = round(Fs * P.Results.refDur);
+[~,waveLen,nObs] = size(waveforms);
+grp = ones(nObs,1);
+nBatch = nObs;
 
-% remove refractory violations
-spkIdx([false; diff(spkIdx) < refLen]) = [];
-
-% waveform window
-waveLen = round(Fs * P.Results.waveDur);
-waveLen = waveLen + mod(waveLen,2);
-
-%% Center waveforms and remove putative overlaps
-
-if size(X,1)>size(X,2)
-    X = X';
+while any(nBatch > P.Results.batchSize)
+    
+    % append new layer
+    grp = [grp, zeros(nObs,1)];
+    
+    % split each previous layer
+    uql = setdiff(unique(grp(:,end-1)),0);
+    
+    for ii = 1:length(uql)
+        
+        lid = (grp(:,end-1)==uql(ii));
+    
+        if nnz(lid) > P.Results.batchSize
+%             pTest = 1-2*min(nnz(lid)-P.Results.batchSize,P.Results.batchSize)/nnz(lid);
+            pTest = 1-2*min((nnz(lid)/2)-1,P.Results.batchSize)/nnz(lid);
+            lTmp = myosort.split1D(wEner(lid,:),'maxSplit',1,'pThresh',Inf,'pTest',pTest);
+            grp(lid,end) = lTmp + max(grp(:,end));
+%         else
+%             label(lid,end) = ones(nnz(lid),1) + max(label(:,end));
+        end
+    end
+   
+    % update group count
+    nBatch = cellfun(@(l) nnz(grp(:,end)==l), num2cell(setdiff(unique(grp(:,end)),0)));    
 end
 
-% extract initial waveforms
-[waves,spkIdx] = spktrig(X,num2cell(spkIdx),waveLen);
+%% Align
 
-pAligned = 0;
-iter = 0;
-while pAligned < P.Results.tol && iter < P.Results.maxIter
+layer = size(grp,2);
+label = (1:nObs)';
+while layer > 0
     
-    switch P.Results.method
-        case 'amp'
-            [~,maxLoc] = cellfun(@(x) max(double(x).^2), waves, 'uni', false);
-                
-        case 'env'
-            waves = smooth1D(abs(cell2mat(waves)),Fs,'gau','sd',5e-4,'dim',2);
-            waves = mat2cell(waves,ones(size(waves,1),1),size(waves,2));
-            [~,maxLoc] = cellfun(@(x) max(x), waves, 'uni', false);
+    if layer == 1
+        maxDepth = Inf;
+    else
+        maxDepth = 2;
     end
     
-    % compute distance of max norm from center
-    centDist = cellfun(@(ml) ml - waveLen/2, maxLoc, 'uni', false);
+    % group indices
+    unqGrp = setdiff(unique(grp(:,layer)),0);
+    nGrp = length(unqGrp);
     
-    % shift spike locations and waveform indices
-    spkIdx = cellfun(@(loc,cd) loc + cd, spkIdx, centDist);
+    lNew = zeros(size(label));    
+    for iGrp = 1:nGrp
+        
+        grpIdx = grp(:,layer)==unqGrp(iGrp);
+        
+        % labels in group
+        lGrp = label(grpIdx);
+        unqGrpLab = unique(lGrp,'stable');
+        
+        % batch size
+        batchSize = length(unqGrpLab);
+        
+        % waveform templates in group
+        templates = cellfun(@(l) mean(waveforms(:,:,label==l),3), num2cell(unqGrpLab), 'uni', false);
+        templates = cell2mat(reshape(templates,1,1,length(templates)));
+        
+        % template cross correlation 
+        [wXC,enerRat,optLag,~,lags] = myosort.wavexcorr(permute(templates,[2 1 3]),'signed',false);
+        optShift = sign(optLag).*lags(abs(optLag));
+        wSim = wXC.*enerRat;
+        wSim(1:(1+batchSize):batchSize^2) = -Inf;
+        
+        % shift sequence
+        shiftSeq = (1:batchSize)';
+        while size(shiftSeq,2)<maxDepth && length(unique(shiftSeq(:,end))) > 1
+            shiftFrom = unique(shiftSeq(:,end));
+            shiftTo = shiftFrom;
+            [~,bestMatch] = max(wSim(shiftTo,shiftTo),[],2);
+            for ii = 1:length(shiftTo)
+                shiftTo(ii) = shiftTo(bestMatch(ii));
+            end
+            [~,mapIdx] = ismember(shiftSeq(:,end),shiftFrom);
+            shiftSeq = [shiftSeq, shiftTo(mapIdx)];
+        end
+        
+        % optimal time shift
+        dS = zeros(batchSize,1);
+        for ii = 2:size(shiftSeq,2)
+            dS = dS + optShift(sub2ind(size(optShift),shiftSeq(:,ii),shiftSeq(:,ii-1)));
+        end
+        dS = dS';
+        
+        % shift waveforms and spikes in batch
+        for ii = 1:batchSize
+            lid = (label==unqGrpLab(ii));
+            spkIdx(lid) = spkIdx(lid) - dS(ii);
+            waveforms(:,:,lid) = myosort.spktrig(X, spkIdx(lid), waveLen);
+        end
+        
+        % group
+        lTmp = zeros(batchSize,1);
+        uqID = unique(shiftSeq(:,end));
+        for ii = 1:length(uqID)
+            lTmp(shiftSeq(:,end)==uqID(ii)) = ii;
+        end
+        
+        % update labels
+        lNewMax = max(lNew);
+        for ii = 1:batchSize
+            lid = ismember(label,unqGrpLab(ii));
+            lNew(lid) = lTmp(ii) + lNewMax;
+        end
+    end
     
-    % remove refractory violations
-    refViol = [false; diff(spkIdx) < refLen];
-    spkIdx(refViol) = [];
-    maxLoc(refViol) = [];
+    % copy ungrouped labels
+    lNewMax = max(lNew);
+    uqlRem = unique(label(grp(:,layer)==0));
+    for ii = 1:length(uqlRem)
+        lid = ismember(label,uqlRem(ii));
+        lNew(lid) = ii + lNewMax;
+    end
     
-    % update waveforms
-    [waves,spkIdx] = spktrig(X,num2cell(spkIdx),waveLen);
-    
-    % percent aligned
-    pAligned = nnz(cell2mat(maxLoc)==waveLen/2)/length(spkIdx);
-    
-    iter = iter + 1;
+    % overwrite labels
+    label = lNew;
+    layer = layer-1;
 end
 
-%% Post processing
+% remove duplicates
+spkIdx = unique(spkIdx);
+fprintf('Removed %i spikes due to refractory violations (%i remaining)\n',...
+    length(Spk.detect)-length(spkIdx), length(spkIdx))
 
-% remove remaining misaligned waveforms
-[~,maxLoc] = cellfun(@(x) max(double(x).^2), waves);
-isMisaligned = maxLoc~=waveLen/2;
-spkIdx(isMisaligned) = [];
-waves(isMisaligned) = [];
+% extend waveforms
+waveLen = round(opt.Fs*opt.clusterWaveformDuration);
+waveforms = myosort.spktrig(X, spkIdx, waveLen);
 
-% output as array
-waves = cell2mat(waves);
-spkIdx = cell2mat(spkIdx);
+% center
+[~,com] = max(mean(abs(waveforms./noiseStd),3),[],2);
+spkIdx = spkIdx - (1+round(waveLen/2)-round(mean(com)));
+
+%%
+
+waveLen = size(waveforms,2);
+nObs = length(spkIdx);
+
+[wXC,enerRat,optLag,~,lags] = myosort.wavexcorr(permute(waveforms,[2 1 3]),'signed',false);
+optShift = sign(optLag).*lags(abs(optLag));
+wSim = wXC.*enerRat;
+
+% construct shift sequence
+shiftSeq = (1:nObs)';
+while length(unique(shiftSeq(:,end))) > 1
+    shiftFrom = unique(shiftSeq(:,end));
+    shiftTo = shiftFrom;
+    [~,bestMatch] = max(wSim(shiftTo,shiftTo),[],2);
+    for ii = 1:length(shiftTo)
+        shiftTo(ii) = shiftTo(bestMatch(ii));
+    end
+    [~,mapIdx] = ismember(shiftSeq(:,end),shiftFrom);
+    shiftSeq = [shiftSeq, shiftTo(mapIdx)];
+end
+
+% compute optimal shift
+dS = zeros(nObs,1);
+for ii = 2:size(shiftSeq,2)
+    dS = dS + optShift(sub2ind(size(optShift),shiftSeq(:,ii),shiftSeq(:,ii-1)));
+end
+dS = dS';
+
+% shift spikes
+spkIdxAligned = spkIdx - dS;
+
+% remove duplicates
+isDuplicate = [false, diff(spkIdxAligned)==0];
+spkIdxAligned(isDuplicate) = [];
+wXC = wXC(~isDuplicate,~isDuplicate);
+enerRat = enerRat(~isDuplicate,~isDuplicate);
+
+% shift waveforms
+waveformsAligned = myosort.spktrig(X, spkIdxAligned, waveLen);
+
+% center
+[~,com] = max(mean(mean(myosort.smooth1D(abs(waveformsAligned),Fs,'gau','sd',1e-3,'dim',2),1),3));
+spkIdxAligned = spkIdxAligned - (1+waveLen/2-com);
+waveformsAligned = myosort.spktrig(X, spkIdxAligned, waveLen);

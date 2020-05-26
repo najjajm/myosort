@@ -152,19 +152,93 @@ classdef Neuron
             t = ((1:len)-alignIdx)/Fs;
         end
         
+        % normalize
+        function obj = normalize(obj,varargin)
+            P = inputParser;
+            addParameter(P,'soft',false,@islogical)
+            addParameter(P,'normFact',1.1,@(x) isnumeric(x) && x>=1)
+            parse(P,varargin{:})
+            
+            rMax = max(obj.psth,[],1);
+            if P.Results.soft
+                rMax = rMax * P.Results.normFact;
+            end
+            obj.psth = obj.psth./rMax;           
+        end
+        
         % -----------------------------------------------------------------
         % PLOTTING
         % -----------------------------------------------------------------
         
-        % action potential waveform
-        function plot_waveform(obj)
-            [waveLen,nChan,nUnit] = size(obj.waveform);
-            tW = (1:waveLen)/obj.Fs;
-            waveMin = permute(min(obj.waveform,[],1), [2 3 1]);
-            waveMax = permute(max(obj.waveform,[],1), [2 3 1]);
-            waveRange = diff(cat(3,waveMin,waveMax),[],3)';
-            yBound = max(waveRange,[],2);
-            yOffset = cumsum(yBound);
+        % spike rasters
+        function plot_rast(obj,varargin)
+            P = inputParser;
+            addParameter(P,'unit',1:obj.nUnits,@(x) isnumeric(x) && min(x)>0 && max(x)<=obj.nUnits)
+            addParameter(P,'buffer',0.5,@(x) isnumeric(x) && x>0)
+            addParameter(P,'legend',true,@islogical)
+            addParameter(P,'tickDur',[],@(x) isempty(x) || isnumeric(x))
+            addParameter(P,'lineWidth',1,@isnumeric)
+            parse(P,varargin{:})
+            
+            s = obj.spikes;
+            t = obj.time;
+            
+            cmap = obj.unit_colors(-0.2);
+            hold on
+            
+            unitNo = P.Results.unit;
+            nUnit = length(unitNo);
+            unitNo = fliplr(unitNo);
+            
+            [trialNo,lineNo] = deal(repmat((1:obj.nTrials)',1,nUnit)); 
+            
+            ySpace = ceil(P.Results.buffer*obj.nTrials);
+            lineBuff = (obj.nTrials+ySpace)*(0:nUnit-1);
+            lineBuff(2:end) = lineBuff(2:end)-1;
+            lineNo = lineNo + lineBuff;
+            
+            trialNo = trialNo(:);
+            lineNo = fliplr(lineNo);
+            lineNo = lineNo(:);
+            
+            ySampIdx = repmat(round(linspace(1,obj.nTrials,min(obj.nTrials,3)))',1,nUnit);
+            ySampIdx = ySampIdx + (obj.nTrials)*(0:nUnit-1);
+            ySampIdx = fliplr(ySampIdx);
+            ySampIdx = ySampIdx(:);
+            
+            if ~isempty(P.Results.tickDur)
+               tickLen = round(P.Results.tickDur*obj.Fs); 
+            end
+            
+            fh = zeros(1,nUnit);
+            for ii = 1:nUnit
+                for jj = 1:obj.nTrials
+                    sIdx = find(s(:,unitNo(ii),jj));
+                    if isempty(sIdx)
+                        continue
+                    end
+                    lNo = lineNo(jj+obj.nTrials*(ii-1));
+                    if isempty(P.Results.tickDur)
+                        fh(ii) = plot(t(sIdx),lNo*ones(1,length(sIdx)),'.','color',cmap(unitNo(ii),:));
+                    else
+                        sIdx(sIdx+(tickLen-1) > length(t)) = [];
+                        for kk = 1:length(sIdx)
+                            fh(ii) = plot(t(sIdx(kk)+[0 tickLen-1]),lNo*[1 1],'color',cmap(unitNo(ii),:),'linewidth',P.Results.lineWidth);
+                        end
+                    end
+                end
+            end
+            set(gca,'xlim',t([1 end]))
+            set(gca,'ylim',[0 1+max(lineNo)])
+            
+            set(gca,'ytick',lineNo(ySampIdx))
+            set(gca,'yticklabel',cellfun(@num2str,num2cell(trialNo(ySampIdx)),'uni',false))
+            ylabel('trial')
+            
+            if P.Results.legend
+                legTxt = cellfun(@(n) sprintf('MU %i',n), num2cell(unitNo), 'uni',false);
+                legend(fh(fh~=0),legTxt(fh~=0),'location','best')
+            end
         end
         
         % firing rates
@@ -215,16 +289,8 @@ classdef Neuron
                 end
             end
             
-            nUnit = size(obj(1).waveform,3);
-%             cmap = flipud(jet);
-%             cmap = cmap(round(linspace(1,size(jet,1),nUnit)),:);
-%             
-%             % temporary (darker yellow)
-%             cmap(6,:) = [252 238 33]/255;
-            
-            cmap = brewermap(nUnit,'Spectral');
-            cmap = max([0 0 0],cmap-.1);
-            
+            nUnit = size(obj(1).psth,2);   
+            cmap = obj.unit_colors;
             nCond = length(P.Results.cond);
             nCol = ceil(sqrt(nCond));
             nRow = ceil(nCond/nCol);
@@ -273,6 +339,16 @@ classdef Neuron
         end
     end
     methods (Access = private)
+        % -----------------------------------------------------------------
+        % MOTOR UNIT COLOR MAP
+        % -----------------------------------------------------------------
+        function cmap = unit_colors(obj,brightness)   
+            if nargin == 1
+                brightness = -0.1;
+            end
+            cmap = brewermap(obj(1).nUnits,'Spectral');
+            cmap = max([0 0 0],cmap + brightness); 
+        end
         % -----------------------------------------------------------------
         % UPDATE FIRING RATES
         % -----------------------------------------------------------------

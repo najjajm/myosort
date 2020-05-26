@@ -405,7 +405,8 @@ classdef Spike
         function obj = mrg_labels(obj,labelGrp)
             for ii = 1:length(labelGrp)
                 % shift spike indices
-                wT = obj.template(:,labelGrp{ii}(1),1);
+                unitLabel = setdiff(obj.label,min(obj.label):0);
+                wT = obj.template(:,unitLabel==labelGrp{ii}(1),1);
                 for jj = 2:length(labelGrp{ii})
                     lid = obj.label==labelGrp{ii}(jj);
                     spkIdx = obj.index(lid);

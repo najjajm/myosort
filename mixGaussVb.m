@@ -1,4 +1,4 @@
-function [label, model, L] = prml_mixGaussVb(X, m, prior)
+function [label, model, L] = mixGaussVb(X, m, prior)
 % Variational Bayesian inference for Gaussian mixture.
 % Input: 
 %   X: d x n data matrix

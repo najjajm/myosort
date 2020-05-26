@@ -65,6 +65,9 @@ clear ans varargin
 
 % locate spikes
 spkIdx = findpulses(X,Fs,'normalized',P.Results.normalized,'thresh',P.Results.thresh);
+if nChannels == 1
+    spkIdx = {spkIdx};
+end
 
 % smooth spike train
 s = cell2mat(cellfun(@(idx) sparse(idx,1,true,size(X,1),1),spkIdx,'uni',false));

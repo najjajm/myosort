@@ -98,6 +98,8 @@ for un = 1:nObs
     end
 end
 
+% s = cell2mat(s);
+
 % extract singular output from cell
 if nObs == 1 && nChannels == 1
     y = y{:};

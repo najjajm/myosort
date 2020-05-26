@@ -208,9 +208,14 @@ classdef Ephys
         % -----------------------------------------------------------------
         % DATA PARSING
         % -----------------------------------------------------------------
-        function [obj,tIdx] = range(obj,tLim)
+        function [obj,tIdx,tLim] = range(obj,tLim,limMode)
             % truncates data between time limits
             assert(tLim(1)>=0 && tLim(2)<=obj.time(end), 'Time range out of bounds')
+            
+            if nargin == 3 && strcmp(limMode,'rand')
+                tLim = rand*(obj.time(end)-tLim(2))+tLim;
+            end
+            
             tIdx = (obj.time>=tLim(1) & obj.time<=tLim(2));
             obj.data = obj.data(tIdx,:,:);
             obj.alignIndex = 1-find(tIdx,1);
@@ -323,7 +328,7 @@ classdef Ephys
 %             res = obj.data - vEst;
 %         end
         % -----------------------------------------------------------------
-        % WRAPPER FUNCTIONS
+        % SPIKE DETECTION
         % -----------------------------------------------------------------
         function [Spk,idx] = detect_spikes(obj,varargin)
             % detect spike events and return a Spike object
