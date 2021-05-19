@@ -47,6 +47,12 @@ codegen/
 # Octave session info
 octave-workspace
 
+# mat files
+*.mat
+
+# myosort
+/myosort-out
+
 ### OSX ###
 # General
 .DS_Store
