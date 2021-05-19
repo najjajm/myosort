@@ -9,7 +9,8 @@
 % REQUIRED INPUTS
 %   X (numeric): time series array of any size
 %   Fs (scalar): sample frequency in Hz
-%   method (string): smoothing method. Options: 
+%   method (string): smoothing method. Options:
+%       'beta' (Beta filter)
 %       'gau' (Gaussian filter)
 %       'box' (boxcar filter)
 %
@@ -21,12 +22,17 @@
 %   'dim', <integer>: dimension to apply filter. (default: 1, if X has more
 %       than one non-singleton dimension)
 %
-%   'sd', <scalar>: standard deviation of Gaussian in seconds 
-%       (default: 0.025)
+%   'betaAlpha', <scalar>: beta shape parameter (alpha). (default: 3)
 %
-%   'wid' <scalar>: filter widths. Width of Gaussian filter in multiples of
-%       standard deviation (default: 4) or width of boxcar filter in
-%       seconds (default: 0.1)
+%   'betaBeta', <scalar>: beta shape parameter (beta). (default: 5)
+%
+%   'betaDur', <scalar>: beta duration (s). (default: 0.275)
+%
+%   'boxDur', <scalar>: boxcar duration (s). (default: 0.1)
+%
+%   'gauSd', <scalar>: standard deviation of Gaussian (s). (default: 0.025)
+%
+%   'gauWid', <scalar>: width of Gaussian filter (multiples of SD). (default: 4)
 %
 % OUTPUTS
 %   Y (numeric): smoothed input
@@ -39,12 +45,19 @@
 %   x = zeros(size(t));
 %   x(t==0) = 1;
 %
+%   % filter with a truncated distribution (for neural data) and a full distribution with alpha=2, beta=5
+%   figure
+%   plot(t,x,'k')
+%   hold on
+%   plot(t,smooth1D(x,Fs,'beta',true),'b')
+%   plot(t,smooth1D(x,Fs,'beta',true,'betaAlpha',2,'betaBeta',5,'betaDur',1),'r')
+%
 %   % filter with 10, 50, and 100 ms Gaussians
 %   figure
 %   plot(t,x,'k')
 %   hold on
 %   for sd = [10,50,100]*1e-3
-%       plot(t,smooth1D(x,Fs,'gau',true,'sd',sd))
+%       plot(t,smooth1D(x,Fs,'gau',true,'gauSd',sd))
 %   end
 %   set(gca,'ylim',[0 1])
 %
@@ -52,8 +65,8 @@
 %   figure
 %   plot(t,x,'k')
 %   hold on
-%   for wid = [250,500]*1e-3
-%       plot(t,smooth1D(x,Fs,'box',true,'wid',wid))
+%   for dur = [250,500]*1e-3
+%       plot(t,smooth1D(x,Fs,'box',true,'boxDur',dur))
 %   end
 %   set(gca,'xtick',-1:0.125:1)
 %   set(gca,'ylim',[0 1])
@@ -97,11 +110,16 @@ isscalarnum = @(x,lb,ub) isscalar(x) && isnumeric(x) && x>lb && x<ub;
 % add required, optional, and parameter-value pair arguments
 addRequired(P, 'X', @isnumeric)
 addRequired(P, 'Fs', @(x) isscalarnum(x,0,Inf))
-addRequired(P, 'method', @(s) ischar(s) && ismember(s,{'box','gau'}))
+addRequired(P, 'method', @(s) ischar(s) && ismember(s,{'beta','box','gau'}))
 addOptional(P, 'norm', false, @islogical)
 addParameter(P, 'dim', 1, @(x) isscalarnum(x,0,ndims(X)+1) && x==round(x))
-addParameter(P, 'sd', 0.025, @(x) isscalarnum(x,0,Inf))
-addParameter(P, 'wid', [], @(x) isscalarnum(x,0,Inf))
+addParameter(P, 'betaAlpha', 3, @(x) isscalarnum(x,0,Inf))
+addParameter(P, 'betaBeta', 5, @(x) isscalarnum(x,0,Inf))
+addParameter(P, 'betaDur', 0.275, @(x) isscalarnum(x,0-eps,1+eps)) 
+addParameter(P, 'boxDur', 0.1, @(x) isscalarnum(x,0,Inf))
+addParameter(P, 'gauSd', 0.025, @(x) isscalarnum(x,0,Inf))
+addParameter(P, 'gauWid', 4, @(x) isscalarnum(x,0,Inf))
+
 
 % clear workspace (parser object retains the data while staying small)
 parse(P, X, Fs, method, varargin{:});
@@ -111,14 +129,21 @@ clear ans varargin
 
 switch method
     
+    case 'beta' % beta
+        
+        % convert parameters to samples
+        xx = 0:1/Fs:P.Results.betaDur;
+        
+        % impulse response
+        a = P.Results.betaAlpha;
+        b = P.Results.betaBeta;
+        B = (gamma(a)*gamma(b))/gamma(a+b);
+        fx = (xx.^(a-1).*(1-xx).^(b-1))/B;
+    
     case 'box' % Boxcar
         
         % convert parameters to samples
-        boxWidSec = P.Results.wid;
-        if isempty(boxWidSec)
-            boxWidSec = 0.1;
-        end
-        wid = round(Fs * boxWidSec);
+        wid = round(Fs * P.Results.boxDur);
         wid = wid + mod(wid,2);
         
         % sample points
@@ -131,13 +156,8 @@ switch method
     case 'gau' % Gaussian
         
         % convert parameters to samples
-        sd = Fs * P.Results.sd;
-        
-        gauWidSec = P.Results.wid;
-        if isempty(gauWidSec)
-            gauWidSec = 4;
-        end
-        wid = round(sd * gauWidSec);
+        sd = Fs * P.Results.gauSd;
+        wid = round(sd * P.Results.gauWid);
         
         % Gaussian samples
         xx = -wid:wid;

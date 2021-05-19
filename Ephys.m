@@ -441,6 +441,41 @@ classdef Ephys
                 end
             end          
         end
+        function plotfit(obj,tLim,spikes,label,templates)
+            
+            nUnit = size(templates,3);
+            cmap = brewermap(nUnit,'Spectral');
+            cmap = max([0 0 0],cmap-0.1);
+            
+            waveLen = size(templates,1);
+            frame = -waveLen/2:waveLen/2-1;
+            
+            tIdx = round(tLim*obj.Fs);
+            inBound = spikes>tIdx(1)+waveLen/2 & spikes<tIdx(2)-waveLen/2;
+            label = label(inBound);
+            spikes = double(spikes(inBound));
+            spikes = spikes-tIdx(1)+1;
+            
+            figure
+            ax = [];
+            fh = cell(1,nUnit);
+            for iCh = 1:obj.nChannels
+                ax(iCh) = subplot(obj.nChannels,1,iCh);
+                hold on
+                plot(obj.data(tIdx(1):tIdx(2),iCh),'k','linewidth',1.5);
+                for iUn = 1:nUnit
+                    sIdx = spikes(label==iUn);
+                    for iSp = 1:length(sIdx)
+                        fh{iUn} = plot(frame+sIdx(iSp),templates(:,iCh,iUn),'color',cmap(iUn,:),'linewidth',2);
+                    end
+                end
+            end
+            onPlot = ~cellfun(@isempty,fh);
+            unitNo = 1:nUnit;
+            fh = cat(1,fh{:});
+            legend(fh,cellfun(@(n) ['MU ' num2str(n)],num2cell(unitNo(onPlot)),'uni',false),'location','best')
+            linkaxes(ax,'x')
+        end
     end
     methods (Access = private)
         function fh = set_fig(~,code)

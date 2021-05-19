@@ -61,7 +61,6 @@ addParameter(P, 'waveformDuration', [3, 10]*1e-3, @isnumeric)
 addParameter(P, 'alignBatchSize', 100, @isscalar)
 % clustering
 addParameter(P, 'clusterFeatures', 3, @isnumeric)
-addParameter(P, 'clusterRounds', 10, @isnumeric)
 % triage
 addParameter(P, 'triageCutProportion', 0.2, @isnumeric)
 addParameter(P, 'triageBins', 100, @isscalar)
@@ -200,6 +199,8 @@ for iBlock = blockStart:blockStop
     movefile([sumPref '_working.txt'],[sumPref '.txt'])
 end
 
+%% Post-processing
+
 % concatenate summary files
 summaryFiles = dir([opt.savePath 'summary_*']);
 summaryName = arrayfun(@(x) x.name,summaryFiles,'uni',false);
@@ -223,7 +224,18 @@ for ii = 1:length(summaryFiles)
     fidPart = fopen([opt.savePath, summaryFiles(ii).name]);
     fwrite(fid,fread(fidPart,'*char'),'*char');
 end
-fclose(fid);
 
-%%
-RunTimer.total = toc(RunTimer.total);
+% log runtime
+runTime = toc(RunTimer.total);
+if runTime < 60
+    tUnit = 'sec';
+elseif runTime >= 60 && runTime < 3600
+    runTime = runTime/60;
+    tUnit = 'min';
+else
+    runTime = runTime/3600;
+    tUnit = 'hr';
+end
+fwrite(fid,sprintf('Total runtime: %.2f %s',runTime,tUnit),'*char');
+
+fclose(fid);

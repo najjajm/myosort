@@ -8,7 +8,7 @@ function [X,opt] = detect(X,opt)
 [nChan,nSamp] = size(X);
 
 % estimate standard deviation of noise
-noiseStd = double(median(abs(X),2));
+noiseStd = double(median(abs(X)/0.6745,2));
 
 % batch data
 nBatches = ceil(nChan*nSamp/opt.maxArray);

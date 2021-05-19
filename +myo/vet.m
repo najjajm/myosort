@@ -9,6 +9,7 @@ load([opt.savePath 'spikes'],'Spk')
 load([opt.savePath 'labels'],'Lab')
 load([opt.savePath 'templates'],'W')
 
+spkIdx = Spk.triage;
 label = double(Lab.triage);
 w = W.triage;
 
@@ -119,6 +120,9 @@ end
 
 %% Post-processing
 
+spkIdx(label==0) = [];
+label(label==0) = [];
+
 % update labels
 lNew = zeros(size(label));
 for ii = 1:length(uql)
@@ -128,7 +132,7 @@ label = lNew;
 
 %% Save results
 
-Spk.vet = NaN;
+Spk.vet = spkIdx;
 Lab.vet = uint16(label);
 W.vet = w;
 

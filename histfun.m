@@ -116,7 +116,7 @@ T = size(Y,2);
 % bin limits
 lim = P.Results.lim;
 if isempty(lim)
-    lim = 1.5*double([floor(min(Y(:))), ceil(max(Y(:)))]);
+    lim = 1*double([floor(min(Y(:))), ceil(max(Y(:)))]);
 end      
 
 % bin samples
@@ -136,7 +136,7 @@ end
 %% Plot
 
 % filter counts
-filtCounts = cell2mat(cellfun(@(x) smooth1D(x,1,'gau','sd',1), counts, 'uni', false));
+filtCounts = cell2mat(cellfun(@(x) smooth1D(x,1,'gau','gauSd',1), counts, 'uni', false));
 counts = cell2mat(counts);
 
 % log filtered counts
