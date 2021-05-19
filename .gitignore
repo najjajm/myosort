@@ -51,7 +51,7 @@ octave-workspace
 *.mat
 
 # myosort
-/myosort-out
+*/myosort-out
 
 ### OSX ###
 # General
